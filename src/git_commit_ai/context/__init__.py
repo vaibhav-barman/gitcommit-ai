@@ -6,6 +6,7 @@ Handles normalization, convention detection, style analysis, and example selecti
 from __future__ import annotations
 
 from git_commit_ai.context.convention_detector import CommitConventionDetector
+from git_commit_ai.context.example_selector import HistoricalExampleSelector
 from git_commit_ai.context.normalizer import CommitNormalizer
 from git_commit_ai.context.style_analyzer import RepositoryStyleAnalyzer
 from git_commit_ai.core.schemas import (
@@ -28,6 +29,7 @@ __all__ = [
     "ConventionDetectionResult",
     "ExampleRetrievalResult",
     "HistoricalExample",
+    "HistoricalExampleSelector",
     "NormalizedCommit",
     "RepositoryContext",
     "RepositoryStyleAnalyzer",
