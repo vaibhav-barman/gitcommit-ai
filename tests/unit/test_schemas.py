@@ -5,12 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 
 from git_commit_ai.core.schemas import (
+    CommitConvention,
+    CommitStyleProfile,
+    ConventionDetectionResult,
     DiffMode,
     DiffResult,
     DiffStatistics,
+    ExampleRetrievalResult,
     FileChange,
     FileStatus,
     HistoricalCommit,
+    HistoricalExample,
+    NormalizedCommit,
+    RepositoryContext,
     RepositoryInfo,
     RepositorySnapshot,
 )
@@ -123,3 +130,116 @@ def test_repository_snapshot_matching() -> None:
 
     assert s1.matches(s2) is True
     assert s1.matches(s3) is False
+
+
+def test_commit_convention_enum_values() -> None:
+    """Verify CommitConvention StrEnum values."""
+    assert CommitConvention.CONVENTIONAL.value == "conventional"
+    assert CommitConvention.SCOPED_CONVENTIONAL.value == "scoped_conventional"
+    assert CommitConvention.GITMOJI.value == "gitmoji"
+    assert CommitConvention.BRACKET_PREFIX.value == "bracket_prefix"
+    assert CommitConvention.PLAIN.value == "plain"
+    assert CommitConvention.UNKNOWN.value == "unknown"
+
+
+def test_normalized_commit_model() -> None:
+    """Verify NormalizedCommit attributes and full_original_message property."""
+    commit = NormalizedCommit(
+        hash="1234567890abcdef",
+        original_subject="feat(api): add endpoint",
+        original_body="Body line 1\nBody line 2",
+        cleaned_subject="add endpoint",
+        cleaned_body="Body line 1\nBody line 2",
+        convention=CommitConvention.SCOPED_CONVENTIONAL,
+        commit_type="feat",
+        scope="api",
+        is_breaking=False,
+    )
+    assert commit.commit_type == "feat"
+    assert commit.scope == "api"
+    assert commit.is_breaking is False
+    assert commit.full_original_message == "feat(api): add endpoint\n\nBody line 1\nBody line 2"
+
+    single_line = NormalizedCommit(
+        hash="1234",
+        original_subject="Initial commit",
+        cleaned_subject="Initial commit",
+        convention=CommitConvention.PLAIN,
+    )
+    assert single_line.full_original_message == "Initial commit"
+
+
+def test_convention_detection_result_model() -> None:
+    """Verify ConventionDetectionResult fields."""
+    result = ConventionDetectionResult(
+        detected_convention=CommitConvention.CONVENTIONAL,
+        confidence=0.85,
+        supporting_evidence=["85% of commits match conventional commit pattern"],
+        analyzed_commits=20,
+        format_distribution={"conventional": 17, "plain": 3},
+    )
+    assert result.confidence == 0.85
+    assert result.analyzed_commits == 20
+    assert result.format_distribution["conventional"] == 17
+
+
+def test_commit_style_profile_model() -> None:
+    """Verify CommitStyleProfile default and populated values."""
+    profile = CommitStyleProfile(
+        dominant_convention=CommitConvention.SCOPED_CONVENTIONAL,
+        type_frequencies={"feat": 10, "fix": 5},
+        scope_usage_frequency=0.8,
+        common_scopes=["core", "git", "cli"],
+        average_subject_length=48.5,
+        median_subject_length=50.0,
+        typical_capitalization="lowercase",
+        punctuation_patterns=["no_trailing_period"],
+        body_usage_frequency=0.4,
+        breaking_change_frequency=0.05,
+    )
+    assert profile.dominant_convention == CommitConvention.SCOPED_CONVENTIONAL
+    assert profile.type_frequencies["feat"] == 10
+    assert profile.scope_usage_frequency == 0.8
+
+
+def test_historical_example_and_retrieval_model() -> None:
+    """Verify HistoricalExample and ExampleRetrievalResult models."""
+    example = HistoricalExample(
+        hash="abcdef1",
+        subject="feat(auth): add token refresh",
+        body="Expires in 15m",
+        original_message="feat(auth): add token refresh\n\nExpires in 15m",
+        relevance_score=0.92,
+        selection_reasons=["Matching scope 'auth'", "Matching type 'feat'"],
+        matched_scope="auth",
+        matched_type="feat",
+    )
+    assert example.relevance_score == 0.92
+    assert "Matching scope 'auth'" in example.selection_reasons
+
+    retrieval = ExampleRetrievalResult(
+        examples=[example],
+        total_candidates=10,
+        selection_metadata={"recency_decay": 0.1},
+    )
+    assert len(retrieval.examples) == 1
+    assert retrieval.total_candidates == 10
+
+
+def test_repository_context_model() -> None:
+    """Verify RepositoryContext aggregates all subcomponents."""
+    profile = CommitStyleProfile(dominant_convention=CommitConvention.PLAIN)
+    detection = ConventionDetectionResult(
+        detected_convention=CommitConvention.PLAIN,
+        confidence=0.9,
+        analyzed_commits=5,
+    )
+    context = RepositoryContext(
+        style_profile=profile,
+        convention_result=detection,
+        historical_examples=[],
+        analyzed_commit_count=5,
+        retrieval_metadata={"source": "test"},
+    )
+    assert context.analyzed_commit_count == 5
+    assert context.style_profile.dominant_convention == CommitConvention.PLAIN
