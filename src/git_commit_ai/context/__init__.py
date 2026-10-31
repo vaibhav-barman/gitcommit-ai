@@ -5,6 +5,7 @@ Handles normalization, convention detection, style analysis, and example selecti
 
 from __future__ import annotations
 
+from git_commit_ai.context.convention_detector import CommitConventionDetector
 from git_commit_ai.context.normalizer import CommitNormalizer
 from git_commit_ai.core.schemas import (
     CommitConvention,
@@ -19,6 +20,7 @@ from git_commit_ai.core.schemas import (
 
 __all__ = [
     "CommitConvention",
+    "CommitConventionDetector",
     "CommitNormalizer",
     "CommitStyleProfile",
     "CommitTypeStatistics",
