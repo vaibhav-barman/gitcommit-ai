@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from git_commit_ai.context.convention_detector import CommitConventionDetector
 from git_commit_ai.context.normalizer import CommitNormalizer
+from git_commit_ai.context.style_analyzer import RepositoryStyleAnalyzer
 from git_commit_ai.core.schemas import (
     CommitConvention,
     CommitStyleProfile,
@@ -29,4 +30,5 @@ __all__ = [
     "HistoricalExample",
     "NormalizedCommit",
     "RepositoryContext",
+    "RepositoryStyleAnalyzer",
 ]
