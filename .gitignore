@@ -20,6 +20,7 @@ wheels/
 # IDE
 .idea/
 .vscode/
+.agent/
 *.swp
 *.swo
 
