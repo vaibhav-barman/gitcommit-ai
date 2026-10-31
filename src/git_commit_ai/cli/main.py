@@ -1,18 +1,22 @@
 """Typer-based CLI for GitCommit AI.
 
-Provides three commands for Phase 1:
+Provides commands for Git intelligence and repository context:
     - ``inspect``: Display repository metadata.
     - ``diff``: Display staged diff statistics.
     - ``history``: Display recent commit subjects.
+    - ``context``: Display repository commit conventions and writing style.
+    - ``examples``: Retrieve relevant historical commit examples.
 """
 
 from __future__ import annotations
 
 import typer
 
+from git_commit_ai.context.engine import RepositoryContextEngine
+from git_commit_ai.context.example_selector import HistoricalExampleSelector
 from git_commit_ai.core.config import GitCommitAIConfig
 from git_commit_ai.core.exceptions import GitCommitAIError
-from git_commit_ai.core.schemas import DiffMode
+from git_commit_ai.core.schemas import DiffMode, DiffResult
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
 from git_commit_ai.git.repository import RepositoryInspector
@@ -128,6 +132,140 @@ def history(
     for commit in commits:
         short_hash = commit.hash[:7]
         typer.echo(f"  {typer.style(short_hash, fg=typer.colors.YELLOW)} {commit.subject}")
+
+
+@app.command()
+def context(
+    path: str = typer.Option(".", "--path", "-p", help="Path to the Git repository."),
+    count: int | None = typer.Option(
+        None, "--count", "-n", help="Number of historical commits to analyze."
+    ),
+) -> None:
+    """Analyze and display repository commit conventions and writing style."""
+    config = GitCommitAIConfig()
+    inspector = RepositoryInspector(repo_path=path, config=config)
+    history_extractor = CommitHistoryExtractor(inspector=inspector, config=config)
+    engine = RepositoryContextEngine()
+
+    try:
+        inspector.inspect()
+        commits = history_extractor.get_history(count=count)
+        diff_result = DiffResult()
+        ctx = engine.build_context(diff_result, commits)
+    except GitCommitAIError as exc:
+        _handle_error(exc)
+        return
+
+    conv = ctx.convention_result
+    profile = ctx.style_profile
+
+    typer.secho("Repository Commit Context", bold=True)
+    conv_badge = typer.style(
+        conv.detected_convention.value.upper(),
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
+    typer.echo(f"  Convention:     {conv_badge} (confidence: {conv.confidence * 100:.1f}%)")
+    typer.echo(f"  Analyzed:       {conv.analyzed_commits} commits")
+
+    typer.echo()
+    typer.secho("Style Characteristics", bold=True)
+    typer.echo(
+        f"  Subject length: {profile.average_subject_length} chars avg / "
+        f"{profile.median_subject_length} chars median"
+    )
+    typer.echo(f"  Capitalization: {profile.typical_capitalization}")
+    punct_str = ", ".join(profile.punctuation_patterns) or "none"
+    typer.echo(f"  Punctuation:    {punct_str}")
+    typer.echo(f"  Body frequency: {profile.body_usage_frequency * 100:.1f}%")
+    typer.echo(f"  Scope usage:    {profile.scope_usage_frequency * 100:.1f}%")
+    if profile.imperative_mood_frequency is not None:
+        typer.echo(f"  Imperative:     {profile.imperative_mood_frequency * 100:.1f}%")
+
+    if profile.type_frequencies:
+        typer.echo()
+        typer.secho("Common Types:", bold=True)
+        for t, cnt in list(profile.type_frequencies.items())[:6]:
+            typer.echo(f"  {typer.style(t, fg=typer.colors.GREEN)}: {cnt}")
+
+    if profile.common_scopes:
+        typer.echo()
+        typer.secho("Common Scopes:", bold=True)
+        typer.echo("  " + ", ".join(profile.common_scopes[:8]))
+
+    if profile.recent_convention_shifts:
+        typer.echo()
+        typer.secho("Recent Patterns & Shifts:", bold=True)
+        for shift in profile.recent_convention_shifts:
+            typer.echo(f"  {typer.style('•', fg=typer.colors.YELLOW)} {shift}")
+
+    if conv.supporting_evidence:
+        typer.echo()
+        typer.secho("Evidence:", bold=True)
+        for ev in conv.supporting_evidence:
+            typer.echo(f"  - {ev}")
+
+
+@app.command()
+def examples(
+    path: str = typer.Option(".", "--path", "-p", help="Path to the Git repository."),
+    max_examples: int = typer.Option(
+        5, "--max-examples", "-m", help="Maximum number of examples to show."
+    ),
+    unstaged: bool = typer.Option(
+        False, "--unstaged", "-u", help="Match against unstaged changes."
+    ),
+) -> None:
+    """Retrieve and display historical examples relevant to current changes."""
+    config = GitCommitAIConfig()
+    inspector = RepositoryInspector(repo_path=path, config=config)
+    diff_extractor = DiffExtractor(inspector=inspector, config=config)
+    history_extractor = CommitHistoryExtractor(inspector=inspector, config=config)
+    selector = HistoricalExampleSelector(max_examples=max_examples)
+    engine = RepositoryContextEngine(selector=selector)
+
+    mode = DiffMode.UNSTAGED if unstaged else DiffMode.STAGED
+
+    try:
+        inspector.inspect()
+        diff_result = diff_extractor.extract(mode=mode)
+        commits = history_extractor.get_history()
+        ctx = engine.build_context(diff_result, commits)
+    except GitCommitAIError as exc:
+        _handle_error(exc)
+        return
+
+    if not diff_result.file_changes:
+        label = "unstaged" if unstaged else "staged"
+        typer.secho(f"No {label} changes found to match against.", fg=typer.colors.YELLOW)
+        return
+
+    if not ctx.historical_examples:
+        typer.secho("No relevant historical examples found.", fg=typer.colors.YELLOW)
+        return
+
+    label = "Unstaged" if unstaged else "Staged"
+    typer.secho(
+        f"Relevant Historical Examples for {label} Changes ({len(ctx.historical_examples)})",
+        bold=True,
+    )
+
+    for i, ex in enumerate(ctx.historical_examples, 1):
+        typer.echo()
+        score_badge = typer.style(
+            f"Score: {ex.relevance_score:.2f}",
+            fg=typer.colors.GREEN,
+            bold=True,
+        )
+        short_hash = typer.style(ex.hash[:7], fg=typer.colors.YELLOW)
+        typer.echo(f"  {i}. [{short_hash}] {ex.subject} ({score_badge})")
+        if ex.body:
+            first_line = ex.body.splitlines()[0]
+            if len(ex.body.splitlines()) > 1:
+                first_line += "..."
+            typer.echo(f"     {typer.style(first_line, fg=typer.colors.BRIGHT_BLACK)}")
+        for r in ex.selection_reasons:
+            typer.echo(f"     {typer.style('✓', fg=typer.colors.CYAN)} {r}")
 
 
 # ------------------------------------------------------------------

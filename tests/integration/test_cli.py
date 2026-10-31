@@ -19,6 +19,8 @@ def test_cli_help() -> None:
     assert "inspect" in result.output
     assert "diff" in result.output
     assert "history" in result.output
+    assert "context" in result.output
+    assert "examples" in result.output
 
 
 def test_cli_inspect_command(populated_repo: Path) -> None:
