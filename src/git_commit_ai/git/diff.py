@@ -103,17 +103,24 @@ class DiffExtractor:
             parsed = self._parse_numstat_line(line)
             if parsed is None:
                 continue
-            additions, deletions, path, is_binary = parsed
-            status_info = status_map.get(path, (FileStatus.MODIFIED, None))
+            additions, deletions, raw_path, is_binary = parsed
+            old_p, new_p = self._resolve_rename_paths(raw_path)
+            target_path = new_p if " => " in raw_path else raw_path
+            detected_old = old_p if " => " in raw_path else None
+
+            status_info = status_map.get(
+                target_path,
+                (FileStatus.RENAMED if detected_old else FileStatus.MODIFIED, detected_old),
+            )
 
             changes.append(
                 FileChange(
-                    path=path,
+                    path=target_path,
                     status=status_info[0],
                     additions=additions,
                     deletions=deletions,
                     is_binary=is_binary,
-                    old_path=status_info[1],
+                    old_path=status_info[1] or detected_old,
                 )
             )
         return changes
@@ -131,18 +138,30 @@ class DiffExtractor:
         return self._split_lines(result.stdout)
 
     def _diff_args(self, mode: DiffMode) -> list[str]:
-        """Build the base diff command arguments for the given mode.
-
-        Raises:
-            EmptyRepositoryError: If mode is STAGED and the repo has no commits,
-                                  and there are no staged changes to diff.
-        """
+        """Build the base diff command arguments for the given mode."""
         if mode == DiffMode.STAGED:
-            if self._inspector._is_empty_repository():
-                # In an empty repo, diff against the empty tree
-                return ["diff", "--cached", "4b825dc642cb6eb9a060e54bf899d69f82cf7149"]
             return ["diff", "--cached"]
         return ["diff"]
+
+    @staticmethod
+    def _resolve_rename_paths(path: str) -> tuple[str, str]:
+        """Resolve old and new paths from a Git numstat rename representation."""
+        if " => " not in path:
+            return path, path
+        if "{" in path and "}" in path:
+            pre = path[: path.index("{")]
+            post = path[path.index("}") + 1 :]
+            inside = path[path.index("{") + 1 : path.index("}")]
+            old_part, new_part = inside.split(" => ")
+            old_path = f"{pre}{old_part}{post}"
+            new_path = f"{pre}{new_part}{post}"
+        else:
+            old_path, new_path = path.split(" => ")
+        while "//" in old_path:
+            old_path = old_path.replace("//", "/")
+        while "//" in new_path:
+            new_path = new_path.replace("//", "/")
+        return old_path, new_path
 
     @staticmethod
     def _parse_numstat_line(line: str) -> tuple[int, int, str, bool] | None:
