@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import httpx
 import pytest
 
@@ -22,7 +24,7 @@ BASE = "https://api.example.test/v1"
 KEY = "FAKE-" + "k" * 24 + "9z9z"
 
 
-def _client(http: FakeHttp, **kwargs: object) -> HttpClient:
+def _client(http: FakeHttp, unreachable: Callable[[], LLMError] | None = None) -> HttpClient:
     return HttpClient(
         provider="example",
         base_url=BASE,
@@ -30,7 +32,7 @@ def _client(http: FakeHttp, **kwargs: object) -> HttpClient:
         timeout=5,
         transport=http.transport,
         secrets=(KEY,),
-        **kwargs,  # type: ignore[arg-type]
+        unreachable=unreachable,
     )
 
 
