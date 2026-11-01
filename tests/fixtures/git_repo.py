@@ -61,3 +61,53 @@ def commit_file(
         check=True,
         capture_output=True,
     )
+
+
+def stage_file(repo_path: Path, filename: str, content: str | bytes) -> None:
+    """Create or overwrite a file and stage it."""
+    file_path = repo_path / filename
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, bytes):
+        file_path.write_bytes(content)
+    else:
+        file_path.write_text(content, encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo_path), "add", filename],
+        check=True,
+        capture_output=True,
+    )
+
+
+def head_message(repo_path: Path) -> str:
+    """Return the full message of the latest commit."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "log", "-1", "--format=%B"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def commit_count(repo_path: Path) -> int:
+    """Return the number of commits reachable from HEAD (0 for an empty repo)."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-list", "--count", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return int(result.stdout.strip()) if result.returncode == 0 else 0
+
+
+def scoped_history_repo(path: Path) -> Path:
+    """Create a repository whose history uses scoped Conventional Commits."""
+    repo = init_repo(path)
+    commit_file(repo, "src/api/users.py", "def users(): ...\n", "feat(api): add users endpoint")
+    commit_file(repo, "src/api/teams.py", "def teams(): ...\n", "feat(api): add teams endpoint")
+    commit_file(repo, "src/cli/main.py", "def main(): ...\n", "feat(cli): add entry point")
+    commit_file(repo, "docs/setup.md", "# Setup\n", "docs(readme): add setup guide")
+    commit_file(
+        repo, "src/api/users.py", "def users(): return []\n", "fix(api): handle empty list"
+    )
+    return repo

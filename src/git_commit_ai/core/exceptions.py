@@ -110,3 +110,13 @@ class AgentStateError(GitCommitAIError):
     def __init__(self, missing: str) -> None:
         super().__init__(f"Agent state is missing '{missing}'; an upstream node did not run")
         self.missing = missing
+
+
+class StaleStagingError(GitCommitAIError):
+    """Raised when the staged changes differ from those the message was written for."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The staged changes changed while the message was being generated, "
+            "so nothing was committed. Run the command again."
+        )

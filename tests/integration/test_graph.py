@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from git_commit_ai.agents.graph import CommitMessageGraph, GenerationResult
@@ -11,25 +10,12 @@ from git_commit_ai.core.schemas import CommitConvention
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
 from git_commit_ai.git.repository import RepositoryInspector
-from tests.fixtures.git_repo import commit_file, init_repo
+from tests.fixtures.git_repo import init_repo, scoped_history_repo, stage_file
 from tests.fixtures.scripted_llm import scripted_llm
 
 
-def _repo_with_scoped_history(tmp_path: Path) -> Path:
-    repo = init_repo(tmp_path / "repo")
-    commit_file(repo, "src/api/users.py", "def users(): ...\n", "feat(api): add users endpoint")
-    commit_file(repo, "src/api/teams.py", "def teams(): ...\n", "feat(api): add teams endpoint")
-    commit_file(repo, "src/cli/main.py", "def main(): ...\n", "feat(cli): add entry point")
-    commit_file(repo, "docs/setup.md", "# Setup\n", "docs(readme): add setup guide")
-    commit_file(
-        repo, "src/api/users.py", "def users(): return []\n", "fix(api): handle empty list"
-    )
-    return repo
-
-
 def _stage_new_file(repo: Path) -> None:
-    (repo / "src/api/orders.py").write_text("def orders(): ...\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "src/api/orders.py"], check=True)
+    stage_file(repo, "src/api/orders.py", "def orders(): ...\n")
 
 
 def _generate(repo: Path, llm_drafts: list[str]) -> GenerationResult:
@@ -41,7 +27,7 @@ def _generate(repo: Path, llm_drafts: list[str]) -> GenerationResult:
 
 
 def test_generates_a_message_in_the_repository_convention(tmp_path: Path) -> None:
-    repo = _repo_with_scoped_history(tmp_path)
+    repo = scoped_history_repo(tmp_path / "repo")
     _stage_new_file(repo)
 
     result = _generate(repo, ["feat(api): add orders endpoint"])
@@ -57,7 +43,7 @@ def test_generates_a_message_in_the_repository_convention(tmp_path: Path) -> Non
 
 
 def test_critic_corrects_a_draft_that_ignores_the_convention(tmp_path: Path) -> None:
-    repo = _repo_with_scoped_history(tmp_path)
+    repo = scoped_history_repo(tmp_path / "repo")
     _stage_new_file(repo)
 
     result = _generate(repo, ["Add orders endpoint", "feat(api): add orders endpoint"])
@@ -71,8 +57,7 @@ def test_critic_corrects_a_draft_that_ignores_the_convention(tmp_path: Path) -> 
 
 def test_works_in_a_repository_with_no_commits(tmp_path: Path) -> None:
     repo = init_repo(tmp_path / "fresh")
-    (repo / "README.md").write_text("# Fresh\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+    stage_file(repo, "README.md", "# Fresh\n")
 
     result = _generate(repo, ["docs: add readme"])
 

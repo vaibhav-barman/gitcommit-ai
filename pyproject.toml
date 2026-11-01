@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 gitcommit-ai = "git_commit_ai.cli.main:app"
+git-ai-commit = "git_commit_ai.cli.generate:git_ai_commit"
 
 [project.optional-dependencies]
 openai = [
@@ -69,6 +70,9 @@ select = [
     "TCH",  # flake8-type-checking
     "RUF",  # ruff-specific rules
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Option"]
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]

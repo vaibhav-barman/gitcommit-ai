@@ -6,12 +6,14 @@ Provides commands for Git intelligence and repository context:
     - ``history``: Display recent commit subjects.
     - ``context``: Display repository commit conventions and writing style.
     - ``examples``: Retrieve relevant historical commit examples.
+    - ``generate``: Generate a commit message with the agent graph.
 """
 
 from __future__ import annotations
 
 import typer
 
+from git_commit_ai.cli.generate import generate
 from git_commit_ai.context.engine import RepositoryContextEngine
 from git_commit_ai.context.example_selector import HistoricalExampleSelector
 from git_commit_ai.core.config import GitCommitAIConfig
@@ -26,6 +28,9 @@ app = typer.Typer(
     help="An agentic Git commit message generator.",
     no_args_is_help=True,
 )
+
+
+app.command()(generate)
 
 
 def _handle_error(err: GitCommitAIError) -> None:
