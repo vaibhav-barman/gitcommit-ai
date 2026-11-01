@@ -20,6 +20,8 @@ class ProviderName(enum.StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GEMINI = "gemini"
+    OPENROUTER = "openrouter"
+    HUGGINGFACE = "huggingface"
     OLLAMA = "ollama"
 
 
@@ -36,13 +38,27 @@ ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_MAX_DIFF_CHARS": "max_prompt_diff_chars",
 }
 
-# Variables that hold each provider's API key, canonical name first. Ollama needs none.
+# Variables that hold each provider's API key, canonical name first. Ollama's key is
+# optional: only Ollama Cloud and servers behind authentication need one.
 PROVIDER_KEY_VARIABLES: dict[ProviderName, tuple[str, ...]] = {
     ProviderName.OPENAI: ("OPENAI_API_KEY",),
     ProviderName.ANTHROPIC: ("ANTHROPIC_API_KEY",),
-    ProviderName.GEMINI: ("GOOGLE_API_KEY",),
-    ProviderName.OLLAMA: (),
+    ProviderName.GEMINI: ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    ProviderName.OPENROUTER: ("OPENROUTER_API_KEY",),
+    ProviderName.HUGGINGFACE: ("HF_TOKEN",),
+    ProviderName.OLLAMA: ("OLLAMA_API_KEY",),
 }
+
+# Variables that configured a provider before the config file existed. Setting any of them
+# means the user already set things up through the environment, so first-run setup never
+# starts. Key variables this tool only began reading later are left out: they are often
+# set for other tools, and a run with only those fails without setup.
+ENVIRONMENT_SETUP_VARIABLES: tuple[str, ...] = (
+    "GITCOMMIT_AI_PROVIDER",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+)
 
 
 def config_key(variable: str) -> str:

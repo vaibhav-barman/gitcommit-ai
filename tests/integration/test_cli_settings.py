@@ -376,3 +376,32 @@ class TestSavedSettings:
         result = runner.invoke(app, ["config"])
         assert "credentials.toml is readable by other users" in result.stderr
         assert SECRET not in result.stderr
+
+
+class TestOllamaKeyWarning:
+    @pytest.fixture
+    def staged_repo(self, tmp_path: Path) -> Path:
+        repo = scoped_history_repo(tmp_path / "repo")
+        stage_file(repo, "src/api/orders.py", "def orders(): ...\n")
+        return repo
+
+    @pytest.mark.parametrize(
+        ("url", "warned"),
+        [
+            ("http://box.lan:11434", True),
+            ("https://box.lan", False),
+            ("http://127.0.0.1:1", False),
+        ],
+    )
+    def test_a_key_sent_over_plain_http_to_another_host_is_warned_about(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch, url: str, warned: bool
+    ) -> None:
+        monkeypatch.setenv("GITCOMMIT_AI_PROVIDER", "ollama")
+        monkeypatch.setenv("GITCOMMIT_AI_OLLAMA_URL", url)
+        monkeypatch.setenv("OLLAMA_API_KEY", SECRET)
+        created = use_llm(monkeypatch, scripted_llm(["feat(api): add orders endpoint"]))
+        result = runner.invoke(app, ["generate", "--path", str(staged_repo), "--dry-run"])
+        assert result.exit_code == 0, result.stderr
+        assert created.api_keys[0] == SECRET
+        assert ("without encryption" in result.stderr) is warned
+        assert SECRET not in result.stderr

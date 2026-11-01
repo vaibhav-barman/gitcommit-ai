@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from git_commit_ai.core.config import GitCommitAIConfig, ProviderName
 from git_commit_ai.core.exceptions import (
     AuthenticationError,
     LLMError,
@@ -16,10 +17,10 @@ from git_commit_ai.core.exceptions import (
     RateLimitError,
     TransientLLMError,
 )
-from git_commit_ai.llm import LLMMessage, Role
+from git_commit_ai.llm import LLMMessage, Role, create_provider
 from git_commit_ai.llm.anthropic_provider import AnthropicProvider
 from git_commit_ai.llm.gemini_provider import GeminiProvider
-from git_commit_ai.llm.ollama_provider import OllamaProvider
+from git_commit_ai.llm.ollama_provider import OllamaProvider, sends_key_unencrypted
 from git_commit_ai.llm.openai_compatible import OpenAICompatibleBackend
 from tests.fixtures.http import FakeHttp, json_response
 
@@ -327,3 +328,82 @@ class TestOllamaProvider:
         http = FakeHttp().on("POST", OLLAMA_URL, json_response(200, {"message": {"content": ""}}))
         with pytest.raises(LLMResponseError):
             self._provider(http).complete(CONVERSATION)
+
+
+class TestNewProviders:
+    @pytest.mark.parametrize(
+        ("provider", "url"),
+        [
+            (ProviderName.OPENROUTER, "https://openrouter.ai/api/v1/chat/completions"),
+            (ProviderName.HUGGINGFACE, "https://router.huggingface.co/v1/chat/completions"),
+        ],
+    )
+    def test_openai_compatible_providers_use_their_base_url(
+        self, provider: ProviderName, url: str
+    ) -> None:
+        http = FakeHttp().on("POST", url, _chat("feat: x"))
+        config = GitCommitAIConfig(llm_provider=provider, llm_model="org/model")
+        llm = create_provider(config, api_key=KEY, transport=http.transport)
+        assert llm.complete(CONVERSATION) == "feat: x"
+        assert http.calls[0].headers["authorization"] == f"Bearer {KEY}"
+        assert http.calls[0].body["model"] == "org/model"
+
+    def test_openrouter_sends_attribution_headers_only(self) -> None:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        http = FakeHttp().on("POST", url, _chat("x"))
+        config = GitCommitAIConfig(llm_provider=ProviderName.OPENROUTER)
+        create_provider(config, api_key=KEY, transport=http.transport).complete(CONVERSATION)
+        headers = http.calls[0].headers
+        assert headers["http-referer"] == "https://github.com/vaibhav-barman/gitcommit-ai"
+        assert headers["x-title"] == "GitCommit AI"
+
+    def test_hugging_face_sends_no_attribution_headers(self) -> None:
+        url = "https://router.huggingface.co/v1/chat/completions"
+        http = FakeHttp().on("POST", url, _chat("x"))
+        config = GitCommitAIConfig(llm_provider=ProviderName.HUGGINGFACE)
+        create_provider(config, api_key=KEY, transport=http.transport).complete(CONVERSATION)
+        assert "x-title" not in http.calls[0].headers
+
+
+class TestOllamaKey:
+    def test_a_key_is_sent_as_a_bearer_token(self) -> None:
+        reply = json_response(200, {"message": {"content": "x"}})
+        http = FakeHttp().on("POST", "https://ollama.com/api/chat", reply)
+        OllamaProvider(
+            model="m",
+            base_url="https://ollama.com",
+            temperature=0.2,
+            timeout=5,
+            api_key=KEY,
+            transport=http.transport,
+        ).complete(CONVERSATION)
+        assert http.calls[0].headers["authorization"] == f"Bearer {KEY}"
+
+    def test_a_rejected_key_is_an_auth_error_without_the_key(self) -> None:
+        body = {"error": f"unauthorized {KEY}"}
+        http = FakeHttp().on("POST", "https://ollama.com/api/chat", json_response(401, body))
+        provider = OllamaProvider(
+            model="m",
+            base_url="https://ollama.com",
+            temperature=0.2,
+            timeout=5,
+            api_key=KEY,
+            transport=http.transport,
+        )
+        with pytest.raises(AuthenticationError) as info:
+            provider.complete(CONVERSATION)
+        assert KEY not in str(info.value)
+
+    @pytest.mark.parametrize(
+        ("url", "insecure"),
+        [
+            ("http://localhost:11434", False),
+            ("http://127.0.0.1:11434", False),
+            ("http://[::1]:11434", False),
+            ("https://ollama.internal.example:11434", False),
+            ("http://ollama.internal.example:11434", True),
+            ("http://192.168.1.20:11434", True),
+        ],
+    )
+    def test_plain_http_to_another_host_is_flagged(self, url: str, insecure: bool) -> None:
+        assert sends_key_unencrypted(url) is insecure

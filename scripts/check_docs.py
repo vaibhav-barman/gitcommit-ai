@@ -24,11 +24,11 @@ from typer.core import TyperGroup, TyperOption
 
 from git_commit_ai.cli.git_subcommand import git_app
 from git_commit_ai.cli.main import app as main_app
-from git_commit_ai.core.config import ENV_FIELDS, GitCommitAIConfig, ProviderName
+from git_commit_ai.core.config import ENV_FIELDS, GitCommitAIConfig
 from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from git_commit_ai.git.hooks import SKIP_VARIABLE
-from git_commit_ai.llm.factory import api_key_variable, default_model
+from git_commit_ai.llm.registry import PROVIDERS
 from scripts.eval.cli import app as eval_app
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +85,8 @@ GENERATED_PATHS = {
 _PATH_SUFFIXES = (".md", ".py", ".yml", ".yaml", ".toml", ".tape", ".sh", ".svg", ".gif", ".json")
 _NOT_REPO_PATH_PREFIXES = ("/", "~", "$", "http", "git@", "<", ".git/")
 _SRC = ROOT / "src" / "git_commit_ai"
+# Model ids such as anthropic/claude-sonnet-5.5 contain a slash but are not paths.
+_MODEL_IDS = {model for e in PROVIDERS.values() for model in (e.default_model, *e.fallback_models)}
 
 _FENCE = re.compile(r"^```(\w*)\n(.*?)^```", re.DOTALL | re.MULTILINE)
 _CODE_SPAN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
@@ -101,7 +103,9 @@ _COMMAND = re.compile(
 _MAKE = re.compile(r"(?<![\w-])make\s+([a-z][a-z-]*)")
 _MODULE = re.compile(r"python -m ([\w.]+)")
 _DEFAULT_ROW = re.compile(r"^\|\s*`(GITCOMMIT_AI_[A-Z_]+)`\s*\|\s*`?([^|`]+?)`?\s*\|")
-_PROVIDER_ROW = re.compile(r"^\|\s*(OpenAI|Anthropic|Gemini|Ollama)\s*\|(.*)\|\s*$")
+_PROVIDER_ROW = re.compile(
+    r"^\|\s*(" + "|".join(re.escape(e.label) for e in PROVIDERS.values()) + r")\s*\|(.*)\|\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -153,12 +157,8 @@ def collect_cli_surface() -> CliSurface:
 
 def known_environment_variables() -> set[str]:
     """Every environment variable the code reads."""
-    keys = {api_key_variable(provider) for provider in ProviderName}
-    return (
-        set(ENV_FIELDS)
-        | {ENV_FILE_VARIABLE, SKIP_VARIABLE, CONFIG_DIR_VARIABLE}
-        | {k for k in keys if k}
-    )
+    keys = {variable for entry in PROVIDERS.values() for variable in entry.key_variables}
+    return set(ENV_FIELDS) | {ENV_FILE_VARIABLE, SKIP_VARIABLE, CONFIG_DIR_VARIABLE} | keys
 
 
 def import_edges(package: Path = _SRC) -> set[tuple[str, str]]:
@@ -346,22 +346,32 @@ def _same_default(documented: str, actual: object) -> bool:
 
 
 def _check_provider_row(name: str, label: str, cells: str) -> list[Problem]:
-    provider = ProviderName(label.lower())
-    columns = [c.strip().strip("`") for c in cells.split("|")]
-    key = api_key_variable(provider)
+    """A providers-table row: | Label | `name` | key variables | `default model` | ... |"""
+    entry = next(e for e in PROVIDERS.values() if e.label == label)
+    columns = [c.strip() for c in cells.split("|")]
+    provider_name, keys, model = (c.strip("`") for c in columns[:3])
     problems: list[Problem] = []
-    if columns[0] != provider.value:
-        problems.append(Problem(name, f"lists the {label} extra as {columns[0]}"))
-    if key and columns[1] != key:
+    if provider_name != entry.name.value:
+        problems.append(Problem(name, f"lists the {label} name as {provider_name}"))
+    named = re.findall(r"`([A-Z][A-Z0-9_]*)`", columns[1])
+    if entry.requires_key and named[:1] != [entry.key_variables[0]]:
         problems.append(
-            Problem(name, f"lists the {label} key variable as {columns[1]}, code has {key}")
+            Problem(
+                name,
+                f"lists the {label} key variable as {columns[1]}, "
+                f"code has {entry.key_variables[0]}",
+            )
         )
-    if key is None and not columns[1].startswith("none"):
-        problems.append(Problem(name, f"lists a key for {label}, which needs none"))
-    if columns[2] != default_model(provider):
-        model = default_model(provider)
+    if not entry.requires_key and not keys.startswith("none"):
+        problems.append(Problem(name, f"lists a required key for {label}, which needs none"))
+    problems += [
+        Problem(name, f"lists {variable} for {label}, which the code does not read for it")
+        for variable in named
+        if variable not in entry.key_variables
+    ]
+    if model != entry.default_model:
         problems.append(
-            Problem(name, f"lists the {label} model as {columns[2]}, code has {model}")
+            Problem(name, f"lists the {label} model as {model}, code has {entry.default_model}")
         )
     return problems
 
@@ -371,7 +381,7 @@ def _check_paths(name: str, text: str, root: Path) -> list[Problem]:
     files = _repository_files(root)
     for span in sorted(set(_CODE_SPAN.findall(_FENCE.sub("", text)))):
         token = span.strip()
-        if " " in token or not _looks_like_repo_path(token):
+        if " " in token or token in _MODEL_IDS or not _looks_like_repo_path(token):
             continue
         relative = token.rstrip("/")
         if relative in GENERATED_PATHS or _exists(relative, root, files):

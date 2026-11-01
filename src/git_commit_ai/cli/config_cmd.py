@@ -12,7 +12,7 @@ from git_commit_ai.core.exceptions import GitCommitAIError
 from git_commit_ai.core.paths import config_dir
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE, mask_secret
 from git_commit_ai.core.user_config import CONFIG_FILE
-from git_commit_ai.llm.factory import api_key_variable, default_model
+from git_commit_ai.llm.registry import spec
 
 
 def config() -> None:
@@ -41,7 +41,7 @@ def config() -> None:
         value = values[field_name]
         if value is None:
             provider = ProviderName(values["llm_provider"])
-            shown = f"(provider default: {default_model(provider)})"
+            shown = f"(provider default: {spec(provider).default_model})"
         else:
             shown = str(value)
         rows.append((variable, shown, settings.source_of_field(field_name).value, field_name))
@@ -53,15 +53,17 @@ def config() -> None:
 
     typer.echo()
     typer.secho("API keys", bold=True)
+    width = max(len(provider.value) for provider in ProviderName)
     for backend in ProviderName:
-        key_variable = api_key_variable(backend)
-        if key_variable is None:
-            typer.echo(f"  {backend.value:<9} no key needed")
-            continue
+        entry = spec(backend)
         key = settings.api_key_for(backend)
+        variable = key.variable if key and key.variable else entry.key_variables[0]
         status = mask_secret(key.value) if key else "not set"
         origin = f"  [{key.source.value}]" if key else ""
-        typer.echo(f"  {backend.value:<9} {key_variable} = {status}{origin}")
+        optional = (
+            "" if entry.requires_key or key else " (only for Ollama Cloud or a protected server)"
+        )
+        typer.echo(f"  {backend.value:<{width}} {variable} = {status}{origin}{optional}")
 
     typer.echo()
     typer.echo(f"  Set {ENV_FILE_VARIABLE} to choose a .env file, or to '' to skip loading one.")

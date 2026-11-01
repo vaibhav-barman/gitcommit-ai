@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from git_commit_ai.core.config import ProviderName
 from git_commit_ai.llm._common import dig, require_text, split_system
 from git_commit_ai.llm.base import Role
 from git_commit_ai.llm.http import HttpClient
+from git_commit_ai.llm.registry import spec
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -16,7 +18,7 @@ if TYPE_CHECKING:
 
     from git_commit_ai.llm.base import LLMMessage
 
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_BASE_URL = spec(ProviderName.GEMINI).base_url
 
 
 def gemini_headers(api_key: str) -> dict[str, str]:

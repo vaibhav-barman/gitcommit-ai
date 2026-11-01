@@ -21,6 +21,8 @@ if TYPE_CHECKING:
         (ProviderName.OPENAI, "OPENAI_API_KEY"),
         (ProviderName.ANTHROPIC, "ANTHROPIC_API_KEY"),
         (ProviderName.GEMINI, "GOOGLE_API_KEY"),
+        (ProviderName.OPENROUTER, "OPENROUTER_API_KEY"),
+        (ProviderName.HUGGINGFACE, "HF_TOKEN"),
     ],
 )
 def test_missing_key_names_the_env_var(provider: ProviderName, env_var: str) -> None:
@@ -35,6 +37,8 @@ def test_missing_key_names_the_env_var(provider: ProviderName, env_var: str) -> 
         (ProviderName.OPENAI, "OPENAI_API_KEY", "gpt-4o-mini"),
         (ProviderName.ANTHROPIC, "ANTHROPIC_API_KEY", "claude-sonnet-5-5"),
         (ProviderName.GEMINI, "GOOGLE_API_KEY", "gemini-2.5-flash"),
+        (ProviderName.OPENROUTER, "OPENROUTER_API_KEY", "anthropic/claude-sonnet-5.5"),
+        (ProviderName.HUGGINGFACE, "HF_TOKEN", "deepseek-ai/DeepSeek-V4.1-Flash"),
     ],
 )
 def test_builds_keyed_provider_with_default_model(
@@ -87,3 +91,16 @@ def test_requests_go_through_the_given_transport(provider: ProviderName, url: st
     llm = create_provider(config, api_key="k", transport=http.transport)
     assert llm.complete([LLMMessage(role=Role.USER, content="hi")]) == "ok"
     assert len(http.calls) == 1
+
+
+def test_ollama_passes_a_key_when_one_is_given() -> None:
+    http = FakeHttp().on(
+        "POST",
+        "http://localhost:11434/api/chat",
+        json_response(200, {"message": {"content": "ok"}}),
+    )
+    llm = create_provider(
+        GitCommitAIConfig(llm_provider=ProviderName.OLLAMA), api_key="k", transport=http.transport
+    )
+    llm.complete([LLMMessage(role=Role.USER, content="hi")])
+    assert http.calls[0].headers["authorization"] == "Bearer k"

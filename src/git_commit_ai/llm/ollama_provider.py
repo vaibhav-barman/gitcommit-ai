@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from git_commit_ai.core.exceptions import OllamaUnreachableError
 from git_commit_ai.llm._common import dig, require_text, text_or_none
@@ -16,9 +18,29 @@ if TYPE_CHECKING:
     from git_commit_ai.llm.base import LLMMessage
 
 
+def ollama_headers(api_key: str | None) -> dict[str, str]:
+    """A Bearer header when a key is set (Ollama Cloud, or a protected server)."""
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def sends_key_unencrypted(base_url: str) -> bool:
+    """True for a plain ``http://`` URL to anything but this computer."""
+    parts = urlsplit(base_url)
+    if parts.scheme != "http":
+        return False
+    host = parts.hostname or ""
+    if host == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True
+
+
 class OllamaProvider:
     """``LLMProvider`` backed by an Ollama server. A refused connection is reported as
-    ``OllamaUnreachableError`` (not retried); timeouts and 5xx are transient."""
+    ``OllamaUnreachableError`` (not retried); timeouts and 5xx are transient. ``api_key``
+    is sent as a Bearer token when given."""
 
     name = "ollama"
 
@@ -28,6 +50,7 @@ class OllamaProvider:
         base_url: str,
         temperature: float,
         timeout: float,
+        api_key: str | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._model = model
@@ -35,9 +58,10 @@ class OllamaProvider:
         self._http = HttpClient(
             self.name,
             base_url,
-            {},
+            ollama_headers(api_key),
             timeout,
             transport,
+            secrets=(api_key,) if api_key else (),
             unreachable=lambda: OllamaUnreachableError(base_url),
         )
 

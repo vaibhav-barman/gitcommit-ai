@@ -8,7 +8,7 @@ import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
 from git_commit_ai.cli.settings_loader import load_cli_settings
-from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
+from git_commit_ai.core.config import ProviderName
 from git_commit_ai.core.exceptions import GitCommitAIError
 from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
 from git_commit_ai.git.committer import GitCommitter
@@ -17,6 +17,7 @@ from git_commit_ai.git.history import CommitHistoryExtractor
 from git_commit_ai.git.repository import RepositoryInspector
 from git_commit_ai.git.snapshots import SnapshotManager
 from git_commit_ai.llm import create_provider
+from git_commit_ai.llm.ollama_provider import sends_key_unencrypted
 
 if TYPE_CHECKING:
     from git_commit_ai.agents.graph import GenerationResult
@@ -109,6 +110,8 @@ def generate(
         snapshot = snapshots.capture()
 
         key = settings.api_key_for(config.llm_provider)
+        if key and config.llm_provider is ProviderName.OLLAMA:
+            _warn_if_unencrypted(config.ollama_base_url)
         llm = create_provider(config, key.value if key else None, on_retry=_announce_retry)
         if amend:
             _note("Amending the last commit; the message covers it together with staged changes.")
@@ -210,6 +213,15 @@ def _report_review(result: GenerationResult) -> None:
     best = next((d for d in result.state.drafts if d.message == result.message), None)
     for violation in best.critique.violations if best and best.critique else []:
         _note(f"  - {violation.rule}: {violation.message}", color=typer.colors.YELLOW)
+
+
+def _warn_if_unencrypted(base_url: str) -> None:
+    if sends_key_unencrypted(base_url):
+        _note(
+            f"Warning: your Ollama key is sent to {base_url} without encryption; "
+            "use an https:// URL if the server supports it.",
+            color=typer.colors.YELLOW,
+        )
 
 
 def _announce_retry(event: RetryEvent) -> None:

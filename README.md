@@ -77,7 +77,7 @@ Diagnostics go to stderr and the message goes to stdout, so `git ai-commit --dry
 | **`--amend`, `--no-verify`** | Reword or extend the last commit; skip pre-commit and commit-msg hooks |
 | **Commit hook** | `hook install` makes plain `git commit` open your editor with a proposal; existing hooks are backed up and chained |
 | **Safe states** | Refuses mid-merge, cherry-pick or revert; notes a rebase; warns on a detached `HEAD` |
-| **Providers** | OpenAI, Anthropic, Gemini, and Ollama behind one small protocol |
+| **Providers** | Anthropic, Google Gemini, Hugging Face, OpenAI, OpenRouter and Ollama (local or remote) over plain HTTP, behind one small protocol |
 
 ## Quick start
 
@@ -122,12 +122,14 @@ git ai-commit --amend                           # reword the last commit
 
 ### Providers
 
-| Provider | Extra | API key variable | Default model |
-|---|---|---|---|
-| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
-| Gemini | `gemini` | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
-| Ollama | `ollama` | none (local server) | `llama3.1` |
+| Provider | Name | Key variable | Default model (environment-only setups) | Get a key |
+|---|---|---|---|---|
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| Google Gemini | `gemini` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| Hugging Face | `huggingface` | `HF_TOKEN` | `deepseek-ai/DeepSeek-V4.1-Flash` | [a fine-grained token](https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained) with "Make calls to Inference Providers" |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com/api-keys) |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-5.5` | [openrouter.ai](https://openrouter.ai/settings/keys) |
+| Ollama | `ollama` | none for a local server; `OLLAMA_API_KEY` for Ollama Cloud or a protected server | `llama3.1` | [ollama.com](https://ollama.com/settings/keys) (cloud only) |
 
 Choose one with `--provider` and `--model`, or with `GITCOMMIT_AI_PROVIDER` and `GITCOMMIT_AI_MODEL`.
 
@@ -176,7 +178,7 @@ flowchart LR
 
 | Flag | Meaning |
 |---|---|
-| `--provider` | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `--provider` | `openai`, `anthropic`, `gemini`, `openrouter`, `huggingface`, or `ollama` |
 | `--model`, `-m` | Model name (default: the provider's default) |
 | `--dry-run` | Print the message and exit without committing |
 | `--yes`, `-y` | Commit without the confirmation prompt; refused if a provider error cut the run short |
@@ -232,15 +234,17 @@ Effective settings
   ...
 
 API keys
-  openai    OPENAI_API_KEY = not set
-  anthropic ANTHROPIC_API_KEY = not set
-  gemini    GOOGLE_API_KEY = not set
-  ollama    no key needed
+  openai      OPENAI_API_KEY = not set
+  anthropic   ANTHROPIC_API_KEY = not set
+  gemini      GOOGLE_API_KEY = not set
+  openrouter  OPENROUTER_API_KEY = not set
+  huggingface HF_TOKEN = not set
+  ollama      OLLAMA_API_KEY = not set (only for Ollama Cloud or a protected server)
 ```
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `GITCOMMIT_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `GITCOMMIT_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `gemini`, `openrouter`, `huggingface`, or `ollama` |
 | `GITCOMMIT_AI_MODEL` | provider default | Model name |
 | `GITCOMMIT_AI_TEMPERATURE` | `0.3` | Sampling temperature (0–2) |
 | `GITCOMMIT_AI_TIMEOUT` | `60` | Seconds per LLM request |

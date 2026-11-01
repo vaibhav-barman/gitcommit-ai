@@ -179,9 +179,39 @@ class TestApiKeys:
         settings = load_settings(NO_DOTENV, tmp_path, credentials=self._store(tmp_path))
         assert settings.api_key_for(ProviderName.OPENAI) is None
 
-    def test_ollama_reads_no_variable_before_its_key_exists(self, tmp_path: Path) -> None:
-        settings = load_settings(NO_DOTENV, tmp_path)
-        assert settings.api_key_for(ProviderName.OLLAMA) is None
+    def test_ollama_has_no_key_unless_one_is_set(self, tmp_path: Path) -> None:
+        assert load_settings(NO_DOTENV, tmp_path).api_key_for(ProviderName.OLLAMA) is None
+        env = {**NO_DOTENV, "OLLAMA_API_KEY": KEY_ENV}
+        key = load_settings(env, tmp_path).api_key_for(ProviderName.OLLAMA)
+        assert key is not None
+        assert key.variable == "OLLAMA_API_KEY"
+
+    @pytest.mark.parametrize(
+        ("provider", "variable"),
+        [(ProviderName.OPENROUTER, "OPENROUTER_API_KEY"), (ProviderName.HUGGINGFACE, "HF_TOKEN")],
+    )
+    def test_new_provider_variables(
+        self, tmp_path: Path, provider: ProviderName, variable: str
+    ) -> None:
+        key = load_settings({**NO_DOTENV, variable: KEY_ENV}, tmp_path).api_key_for(provider)
+        assert key is not None
+        assert (key.value, key.variable) == (KEY_ENV, variable)
+
+    def test_gemini_alias_is_read_after_the_canonical_name(self, tmp_path: Path) -> None:
+        only_alias = {**NO_DOTENV, "GEMINI_API_KEY": KEY_ENV}
+        key = load_settings(only_alias, tmp_path).api_key_for(ProviderName.GEMINI)
+        assert key is not None
+        assert key.variable == "GEMINI_API_KEY"
+        both = {**only_alias, "GOOGLE_API_KEY": KEY_DOTENV}
+        key = load_settings(both, tmp_path).api_key_for(ProviderName.GEMINI)
+        assert key is not None
+        assert key.variable == "GOOGLE_API_KEY"
+
+    def test_an_environment_alias_beats_a_dotenv_canonical_name(self, tmp_path: Path) -> None:
+        env = {**_dotenv(tmp_path, f"GOOGLE_API_KEY={KEY_DOTENV}\n"), "GEMINI_API_KEY": KEY_ENV}
+        key = load_settings(env, tmp_path).api_key_for(ProviderName.GEMINI)
+        assert key is not None
+        assert (key.value, key.source) == (KEY_ENV, SettingSource.ENVIRONMENT)
 
     def test_the_key_never_appears_in_its_repr(self, tmp_path: Path) -> None:
         settings = load_settings(NO_DOTENV, tmp_path, credentials=self._store(tmp_path))
@@ -204,6 +234,16 @@ class TestConfiguredByEnvironment:
     def test_a_dotenv_key_counts(self, tmp_path: Path) -> None:
         settings = load_settings(_dotenv(tmp_path, f"GOOGLE_API_KEY={KEY_DOTENV}\n"), tmp_path)
         assert settings.provider_configured_by_environment()
+
+    @pytest.mark.parametrize(
+        "variable", ["HF_TOKEN", "OLLAMA_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY"]
+    )
+    def test_variables_this_tool_never_read_before_do_not_count(
+        self, tmp_path: Path, variable: str
+    ) -> None:
+        # Commonly set for other tools; a run with only these fails today, so setup may start.
+        settings = load_settings({**NO_DOTENV, variable: KEY_ENV}, tmp_path)
+        assert not settings.provider_configured_by_environment()
 
     def test_other_variables_do_not_count(self, tmp_path: Path) -> None:
         env = {**NO_DOTENV, "GITCOMMIT_AI_TEMPERATURE": "0.5", "GITCOMMIT_AI_MODEL": "x"}

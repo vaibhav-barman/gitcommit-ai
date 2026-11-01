@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from git_commit_ai.core.config import ProviderName
 from git_commit_ai.llm._common import dig, require_text, split_system
 from git_commit_ai.llm.base import Role
 from git_commit_ai.llm.http import HttpClient
+from git_commit_ai.llm.registry import spec
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
 
     from git_commit_ai.llm.base import LLMMessage
 
-ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+ANTHROPIC_BASE_URL = spec(ProviderName.ANTHROPIC).base_url
 ANTHROPIC_VERSION = "2023-06-01"
 _MAX_OUTPUT_TOKENS = 1024
 

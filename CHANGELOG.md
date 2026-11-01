@@ -20,6 +20,15 @@ No version has been released yet; everything below is under **Unreleased**.
   config directory (`GITCOMMIT_AI_CONFIG_DIR`). Both rank below the environment and `.env`, so
   setups configured through variables behave exactly as before.
 
+### Added (this release)
+
+- **OpenRouter and Hugging Face providers** (`openrouter`, `OPENROUTER_API_KEY`; `huggingface`,
+  `HF_TOKEN`), sharing one OpenAI-compatible backend with OpenAI.
+- **Ollama keys**: `OLLAMA_API_KEY` is sent as a Bearer token, for Ollama Cloud
+  (`GITCOMMIT_AI_OLLAMA_URL=https://ollama.com`) or a protected server. A warning appears when a
+  key would go over plain `http://` to another machine.
+- `GEMINI_API_KEY` is accepted as well as `GOOGLE_API_KEY`.
+
 ### Removed
 
 - `ProviderNotInstalledError`: there are no optional SDKs left to be missing.

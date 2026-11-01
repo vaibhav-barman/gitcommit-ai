@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 
 from git_commit_ai.core.config import (
     ENV_FIELDS,
+    ENVIRONMENT_SETUP_VARIABLES,
     PROVIDER_KEY_VARIABLES,
     GitCommitAIConfig,
     ProviderName,
@@ -140,11 +141,10 @@ class Settings:
         return ResolvedKey(saved, source, None)
 
     def provider_configured_by_environment(self) -> bool:
-        """True if the environment or ``.env`` names a provider or holds any provider key.
-        Such setups predate the config file, so they never trigger first-run setup."""
-        variables = ["GITCOMMIT_AI_PROVIDER"]
-        variables += [v for names in PROVIDER_KEY_VARIABLES.values() for v in names]
-        return any(self.environment.get(variable) for variable in variables)
+        """True if the environment or ``.env`` names a provider or holds a key variable this
+        tool has always read. Such setups predate the config file, so they never trigger
+        first-run setup."""
+        return any(self.environment.get(variable) for variable in ENVIRONMENT_SETUP_VARIABLES)
 
     def source_of_variable(self, name: str) -> SettingSource:
         """Source of an environment-style variable such as ``OPENAI_API_KEY``."""

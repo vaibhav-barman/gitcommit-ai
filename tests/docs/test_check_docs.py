@@ -62,7 +62,8 @@ class TestTheRealDocuments:
     def test_every_environment_variable_the_code_reads_is_known(self) -> None:
         known = known_environment_variables()
         assert {"GITCOMMIT_AI_PROVIDER", "GITCOMMIT_AI_ENV_FILE", "GITCOMMIT_AI_HOOK"} <= known
-        assert {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"} <= known
+        assert {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"} <= known
+        assert {"OPENROUTER_API_KEY", "HF_TOKEN", "OLLAMA_API_KEY"} <= known
         assert "GITCOMMIT_AI_CONFIG_DIR" in known
 
 
@@ -170,13 +171,22 @@ class TestDefaults:
     def test_a_wrong_provider_key_variable_is_reported(
         self, tmp_path: Path, surface: CliSurface
     ) -> None:
-        row = "| Gemini | `gemini` | `GEMINI_KEY` | `gemini-2.5-flash` |\n"
-        assert _mentions(_check(tmp_path, surface, row), "Gemini", "GEMINI_KEY")
+        row = "| Google Gemini | `gemini` | `GEMINI_KEY` | `gemini-2.5-flash` |\n"
+        assert _mentions(_check(tmp_path, surface, row), "Google Gemini", "GEMINI_KEY")
+
+    def test_a_wrong_provider_name_is_reported(self, tmp_path: Path, surface: CliSurface) -> None:
+        row = "| OpenRouter | `open-router` | `OPENROUTER_API_KEY` | `x` |\n"
+        assert _mentions(_check(tmp_path, surface, row), "OpenRouter", "open-router")
 
     def test_correct_provider_rows_pass(self, tmp_path: Path, surface: CliSurface) -> None:
         rows = (
-            "| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |\n"
-            "| Ollama | `ollama` | none (local server) | `llama3.1` |\n"
+            "| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | a link |\n"
+            "| Google Gemini | `gemini` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` "
+            "| `gemini-2.5-flash` | a link |\n"
+            "| Hugging Face | `huggingface` | `HF_TOKEN` "
+            "| `deepseek-ai/DeepSeek-V4.1-Flash` | a link |\n"
+            "| Ollama | `ollama` | none locally; `OLLAMA_API_KEY` for Ollama Cloud "
+            "| `llama3.1` | a link |\n"
         )
         assert _check(tmp_path, surface, rows) == []
 
@@ -200,7 +210,7 @@ class TestPathsAndLinks:
     ) -> None:
         text = (
             "`docs/assets/demo.gif`, `/tmp/x`, `+/-`, `src/<x>`, `a b/c.py`, `~/f`, "
-            "`config.toml`, `credentials.toml`\n"
+            "`config.toml`, `credentials.toml`, `anthropic/claude-sonnet-5.5`\n"
         )
         assert _check(tmp_path, surface, text) == []
 
