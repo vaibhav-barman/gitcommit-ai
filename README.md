@@ -23,7 +23,7 @@ Modern software changes are complex, cross-cutting, and full of context that sim
 - **Staleness Guarding**: Tree-hash snapshotting ensures that any changes staged while generation is underway abort or trigger re-analysis before any commit can occur.
 - **Hybrid Cloud / Local LLM Inference**: Pluggable backend support for OpenAI, Anthropic, Google Gemini, Ollama, and local llama.cpp servers.
 
-> **Current Milestone**: Phase 1 (Git Intelligence Layer) and Phase 2 (Repository Context Engine) are complete. All repository inspection, diff extraction, commit normalization, statistical convention detection, style profiling, and heuristic example retrieval run 100% deterministically with zero LLM dependencies.
+> **Current Milestone**: Phases 1–3 are complete. Repository inspection, diff extraction, commit normalization, statistical convention detection, style profiling, and example retrieval (Phases 1 and 2) run 100% deterministically with zero LLM dependencies. Phase 3 adds the LangGraph agent graph, four pluggable LLM backends, and the `generate` command; LLM calls happen only inside `git_commit_ai.agents`.
 
 ---
 
@@ -52,7 +52,7 @@ Modern software changes are complex, cross-cutting, and full of context that sim
   - Normalizes Conventional Commits, bracket-prefixed commits (`[AUTH]`), Gitmoji (both shortcodes and unicode), and unstructured plain messages.
   - Extracts breaking change footers (`BREAKING CHANGE:` / `BREAKING-CHANGE:`) and subject exclamation marks (`feat!: ...`).
 - **Commit Convention Detection (`CommitConventionDetector`)**:
-  - Statistically identifies repository convention (`conventional`, `scoped_conventional`, `gitmoji`, `bracket_prefixed`, `plain`).
+  - Statistically identifies repository convention (`conventional`, `scoped_conventional`, `gitmoji`, `bracket_prefix`, `plain`).
   - Calculates confidence scores adjusted for sample size penalties when evaluating small histories.
   - Generates human-readable evidence summaries explaining why a convention was detected.
 - **Repository Style Profiling (`RepositoryStyleAnalyzer`)**:
@@ -73,6 +73,20 @@ Modern software changes are complex, cross-cutting, and full of context that sim
   - Provides explainable selection reasons for every retrieved example.
 - **Unified Context Engine (`RepositoryContextEngine`)**:
   - Coordinates normalizer, convention detector, style analyzer, and example selector into a cohesive `RepositoryContext` payload ready for future LLM prompt injection.
+
+### 3. Agentic Generation (Phase 3)
+- **LLM Providers (`git_commit_ai.llm`)**:
+  - A small `LLMProvider` protocol (`name`, `model`, `complete`) with OpenAI, Anthropic, Gemini, and Ollama backends. SDKs are optional extras, so the base install stays light.
+  - `create_provider()` selects the backend from configuration and reads API keys from the environment.
+  - Typed errors: `MissingAPIKeyError`, `ProviderNotInstalledError`, `OllamaUnreachableError`, `RateLimitError` (with the server's retry hint), `LLMResponseError`.
+  - A deterministic `FakeLLM` for tests; no test touches the network.
+- **LangGraph Orchestration (`git_commit_ai.agents`)**:
+  - *Diff analyst*: reads a budgeted rendering of the staged diff and returns the change type, summary, intent, breaking flag, and scope hint.
+  - *Context retrieval*: wraps `RepositoryContextEngine`; no LLM and no reimplementation.
+  - *Generator*: builds its prompt from the detected convention, the style profile, and retrieved examples, and revises using the critic's feedback.
+  - *Critic*: deterministic rules first (format, scope, subject length, imperative mood, capitalization, punctuation, breaking-change marking, body habit); the LLM is asked only whether the message is faithful to the diff.
+  - *Reflection loop*: generate → critique → regenerate, capped by `max_iterations`, falling back to the best draft.
+- **Safe committing (`GitCommitter`)**: re-checks the staged tree against a snapshot taken before generation and refuses to commit if it changed.
 
 ---
 
@@ -97,6 +111,49 @@ cd gitcommit-ai
 # Sync dependencies and create virtual environment
 uv sync
 ```
+
+### Choosing an LLM provider
+
+Provider SDKs are optional extras. Install the one you need, or all of them:
+
+```bash
+uv sync --extra openai      # or: anthropic, gemini, ollama
+uv sync --all-extras        # every provider
+```
+
+| Provider | Extra | API key variable | Default model |
+|---|---|---|---|
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
+| Gemini | `gemini` | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
+| Ollama | `ollama` | none (local server) | `llama3.1` |
+
+Using a provider whose extra is not installed fails with the exact `pip install 'gitcommit-ai[...]'` command to run.
+
+### Configuration
+
+Settings come from environment variables; command-line flags override them. See [`.env.example`](.env.example) for the full list. The CLI does **not** load `.env` files, so export the variables yourself (`set -a; source .env; set +a`).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GITCOMMIT_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `GITCOMMIT_AI_MODEL` | provider default | Model name |
+| `GITCOMMIT_AI_TEMPERATURE` | `0.3` | Sampling temperature (0–2) |
+| `GITCOMMIT_AI_TIMEOUT` | `60` | Seconds per LLM request |
+| `GITCOMMIT_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama server |
+| `GITCOMMIT_AI_MAX_ITERATIONS` | `3` | Generate/critique rounds (1–10) |
+| `GITCOMMIT_AI_MAX_DIFF_CHARS` | `24000` | Diff characters sent to the model (min 1000) |
+
+### Using it as `git ai-commit`
+
+Git runs any executable named `git-<name>` on your `PATH` as `git <name>`. Installing the package puts `git-ai-commit` next to `gitcommit-ai`:
+
+```bash
+uv tool install ".[openai]"     # or: pipx install ".[openai]"
+git ai-commit --dry-run
+```
+
+`git ai-commit` runs `generate` directly. Git intercepts `--help` for external commands and looks for a man page, so use `git ai-commit -h` (or `git-ai-commit --help`) for help.
 
 ---
 
@@ -197,6 +254,88 @@ Relevant Historical Examples for Unstaged Changes (5)
      ✓ Shares keywords with change: commit
 ```
 
+### 6. Generate a Commit Message
+Generate a message for the staged changes. The message goes to **stdout**; progress, the verbose report, and warnings go to **stderr**, so `--dry-run` output can be piped.
+
+```bash
+git add -p
+uv run gitcommit-ai generate --dry-run     # print only
+uv run gitcommit-ai generate               # print, confirm, then commit
+uv run gitcommit-ai generate --yes         # commit without asking
+uv run gitcommit-ai generate --provider anthropic --model claude-sonnet-5-5 --verbose
+```
+
+| Flag | Meaning |
+|---|---|
+| `--provider` | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `--model`, `-m` | Model name (default: the provider's default) |
+| `--dry-run` | Print the message and exit without committing |
+| `--yes`, `-y` | Commit without the confirmation prompt |
+| `--max-iterations` | Cap on generate/critique rounds (1–10) |
+| `--verbose`, `-v` | Show the detected convention, examples used, and critic rounds |
+| `--path`, `-p` | Repository path (default: current directory) |
+
+*Example `--verbose` output (stderr, then stdout):*
+```text
+Generating a commit message with openai/gpt-4o-mini...
+Convention: scoped_conventional (confidence 100%, 5 commits analyzed)
+Examples used (4):
+  c74428e feat(api): add teams endpoint [score 3.9]
+  9a8412c feat(api): add users endpoint [score 3.8]
+  9ed3c79 fix(api): handle empty list [score 3.0]
+  3799839 feat(cli): add entry point [score 1.4]
+Critic rounds (2):
+  1. Added orders endpoint -> rejected
+       [error] format: Use the form '<type>(<scope>): <description>'.
+       [error] imperative-mood: 'Added' is not imperative; start with the base verb (for example 'add').
+       [error] capitalization: Start the description with a lowercase letter.
+  2. feat(api): add orders endpoint -> approved
+
+feat(api): add orders endpoint
+```
+
+**Behavior to know about**
+- **Nothing staged**: exits with code 1 and a hint if you have unstaged changes. Nothing is ever staged for you.
+- **Empty repository**: works; with no history there is no convention to match, so Conventional Commits is used.
+- **Binary-only diffs**: the message is based on file names and stats, and you are told so.
+- **Large diffs**: each file's patch gets a share of a character budget; small patches stay whole, large ones are truncated at a line boundary, and files that do not fit are listed by name only. A notice tells you when this happened.
+- **No approved draft**: after `max_iterations` rounds the best draft is shown along with the issues the critic still has.
+- **Staleness guard**: if the staged changes differ from what the message was written for, nothing is committed (exit code 1).
+- **Hooks** run as usual when committing.
+
+---
+
+## 🏗️ Architecture
+
+Dependencies point one way: `cli → agents → context → git/core`. The `llm` package is used only by `agents` (and by the CLI to build the provider).
+
+```mermaid
+graph TD
+    CLI["cli: generate"] --> Extract["git: diff, history, snapshot"]
+    CLI --> Analyst
+
+    subgraph Agents["agents: LangGraph"]
+        Analyst["diff_analyst (LLM)"] --> Retrieval["context_retrieval (deterministic)"]
+        Retrieval --> Generator["generator (LLM)"]
+        Generator --> Critic["critic (rules, then LLM for faithfulness)"]
+        Critic -->|"rejected, rounds left"| Generator
+        Critic -->|"approved or cap reached"| Best["select best draft"]
+    end
+
+    Retrieval -.->|wraps| Engine["context: RepositoryContextEngine"]
+    Analyst -.-> Provider["llm: provider"]
+    Generator -.-> Provider
+    Critic -.-> Provider
+    Provider --> Backends["OpenAI / Anthropic / Gemini / Ollama"]
+
+    Best --> Confirm{"confirm?"}
+    Confirm -->|yes| Committer["git: GitCommitter"]
+    Committer -->|"staged tree unchanged"| Commit[("git commit")]
+    Committer -->|"staged tree changed"| Refuse["refuse: StaleStagingError"]
+```
+
+See [docs/architecture.md](docs/architecture.md) for the state schema, node contracts, critic rules, and design decisions.
+
 ---
 
 ## 🧪 Testing & Quality Assurance
@@ -204,7 +343,7 @@ Relevant Historical Examples for Unstaged Changes (5)
 GitCommit AI maintains strict quality standards: 100% type-annotated (`mypy` strict mode), linted and formatted with `ruff`, and verified against temporary Git repositories using `pytest`.
 
 ```bash
-# Run complete test suite (88 unit + integration tests)
+# Run complete test suite (263 unit + integration tests, no network)
 uv run pytest -v
 
 # Run linter
@@ -217,7 +356,7 @@ uv run ruff format --check .
 uv run mypy src/ tests/
 ```
 
-Tests run in isolated temporary repositories generated by pytest fixtures and will never modify your working repository.
+Tests run in isolated temporary repositories generated by pytest fixtures and will never modify your working repository. LLM behavior is covered with `FakeLLM` and mocked SDK clients, so the suite needs no API keys or network access. Install every provider SDK (`uv sync --all-extras`) before running it, because the backend tests import them.
 
 ---
 
@@ -238,7 +377,8 @@ gitcommit-ai/
 │       │   ├── diff.py               # Staged & unstaged diff extraction
 │       │   ├── history.py            # Delimited historical commit parsing
 │       │   ├── repository.py         # Subprocess-safe repository inspector
-│       │   └── snapshots.py          # Staged tree identity & staleness guard
+│       │   ├── snapshots.py          # Staged tree identity & staleness guard
+│       │   └── committer.py          # Staleness-guarded `git commit`
 │       ├── context/
 │       │   ├── __init__.py
 │       │   ├── normalizer.py         # Semantic commit normalization & parsing
@@ -246,14 +386,41 @@ gitcommit-ai/
 │       │   ├── style_analyzer.py     # Repository style profiling & metrics
 │       │   ├── example_selector.py   # Multi-factor heuristic example retrieval
 │       │   └── engine.py             # Context engine orchestration pipeline
+│       ├── llm/
+│       │   ├── __init__.py
+│       │   ├── base.py               # LLMProvider protocol & message types
+│       │   ├── factory.py            # create_provider(): config -> backend
+│       │   ├── fake.py               # Deterministic FakeLLM for tests
+│       │   ├── openai_provider.py    # OpenAI backend
+│       │   ├── anthropic_provider.py # Anthropic backend
+│       │   ├── gemini_provider.py    # Gemini backend
+│       │   └── ollama_provider.py    # Ollama backend
+│       ├── agents/
+│       │   ├── __init__.py
+│       │   ├── state.py              # AgentState, drafts, critiques
+│       │   ├── diff_budget.py        # Fit large diffs into a prompt budget
+│       │   ├── llm_json.py           # Validated JSON replies with retry
+│       │   ├── diff_analyst.py       # Node: what does the diff do and why
+│       │   ├── context_retrieval.py  # Node: wraps the context engine
+│       │   ├── conventions.py        # Convention rules shared by generator & critic
+│       │   ├── generator.py          # Node: convention-aware drafting
+│       │   ├── critic_rules.py       # Deterministic style/format rules
+│       │   ├── critic.py             # Node: rules, then LLM faithfulness check
+│       │   └── graph.py              # Reflection loop, routing, best-draft fallback
 │       └── cli/
 │           ├── __init__.py
-│           └── main.py               # Typer CLI application (5 commands)
+│           ├── main.py               # Typer CLI application
+│           └── generate.py           # `generate` command & `git ai-commit` entry
 ├── tests/
 │   ├── conftest.py                   # Shared pytest fixtures
 │   ├── fixtures/
-│   │   └── git_repo.py               # Isolated temp git repository factories
+│   │   ├── git_repo.py               # Isolated temp git repository factories
+│   │   ├── diffs.py                  # Synthetic DiffResult builders
+│   │   ├── agent_inputs.py           # Prepared AgentState builders
+│   │   └── scripted_llm.py           # FakeLLM that answers per agent role
 │   ├── unit/
+│   │   ├── agents/                   # Nodes, critic rules, graph routing
+│   │   ├── llm/                      # FakeLLM, backends (mocked SDKs), factory
 │   │   ├── test_config.py            # Configuration tests
 │   │   ├── test_schemas.py           # Schema & enum unit tests
 │   │   ├── test_normalizer.py        # Commit normalizer tests
@@ -264,6 +431,9 @@ gitcommit-ai/
 │   └── integration/
 │       ├── test_cli.py               # CLI inspection & diff tests
 │       ├── test_cli_context.py       # CLI context & examples tests
+│       ├── test_cli_generate.py      # generate command, edge cases, git entry
+│       ├── test_committer.py         # Staleness-guarded commit tests
+│       ├── test_graph.py             # Whole graph against temp repos
 │       ├── test_diff.py              # Diff extraction & rename tests
 │       ├── test_history.py           # Commit history extraction tests
 │       ├── test_repository.py        # Repository inspection tests
@@ -282,6 +452,5 @@ gitcommit-ai/
 
 - **Phase 1 (Completed)**: Project Foundation & Git Intelligence Layer.
 - **Phase 2 (Completed)**: Repository Context Engine & Historical Commit Intelligence.
-- **Phase 3**: LLM Integration & Prompt Engineering (Structured Outputs, Provider Abstraction for OpenAI, Anthropic, Gemini, Ollama).
-- **Phase 4**: Agentic Orchestration with LangGraph (Diff Analyst, Context Retriever, Generator, Reflection Loop).
-- **Phase 5**: Interactive Terminal UI & Native Git Subcommand Integration (`git-commit-ai`).
+- **Phase 3 (Completed)**: LLM provider abstraction (OpenAI, Anthropic, Gemini, Ollama), LangGraph agent graph with a critic-driven reflection loop, the `generate` command, and the `git ai-commit` subcommand.
+- **Phase 4**: Interactive terminal UI for reviewing and editing the proposed message.
