@@ -134,3 +134,55 @@ def head_hash(repo_path: Path) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+def run_git(
+    repo_path: Path,
+    *args: str,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a Git command in ``repo_path`` and capture its output."""
+    return subprocess.run(
+        ["git", "-C", str(repo_path), *args],
+        check=check,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def diverged_repo(path: Path) -> Path:
+    """Create ``main`` and ``feature`` branches that both change ``shared.txt``.
+
+    The repository is left on ``main``. Merging, rebasing, cherry-picking or
+    reverting across them produces a conflict, which leaves Git paused
+    mid-operation.
+    """
+    repo = init_repo(path)
+    commit_file(repo, "shared.txt", "base\n", "chore: add shared file")
+    run_git(repo, "checkout", "-q", "-b", "feature")
+    commit_file(repo, "shared.txt", "feature\n", "feat: change on feature")
+    run_git(repo, "checkout", "-q", "main")
+    commit_file(repo, "shared.txt", "main\n", "feat: change on main")
+    return repo
+
+
+def start_operation(repo: Path, operation: str) -> None:
+    """Leave ``repo`` paused in a conflicted merge, rebase, cherry-pick or revert."""
+    if operation == "merge":
+        run_git(repo, "merge", "feature", check=False)
+    elif operation == "cherry-pick":
+        run_git(repo, "cherry-pick", "feature", check=False)
+    elif operation == "revert":
+        run_git(repo, "revert", "--no-edit", "HEAD~1", check=False)
+    elif operation == "rebase":
+        run_git(repo, "checkout", "-q", "feature")
+        run_git(repo, "rebase", "main", check=False)
+    else:
+        raise ValueError(operation)
+
+
+def resolve_conflict(repo: Path) -> None:
+    """Resolve the conflicted ``shared.txt`` and stage the resolution."""
+    stage_file(repo, "shared.txt", "resolved\n")

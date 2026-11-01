@@ -17,11 +17,15 @@ from git_commit_ai.llm.retry import RetryEvent
 from tests.fixtures.cli import use_llm
 from tests.fixtures.git_repo import (
     commit_count,
+    diverged_repo,
     head_message,
     init_repo,
     install_hook,
+    resolve_conflict,
+    run_git,
     scoped_history_repo,
     stage_file,
+    start_operation,
 )
 from tests.fixtures.scripted_llm import scripted_llm
 
@@ -245,6 +249,70 @@ class TestBody:
         assert result.exit_code == 0
         assert "Add a short body after a blank line" in llm.calls[1][1].content
         assert result.stdout.strip() == f"{GOOD}\n\nAdds several modules."
+
+
+class TestRepositoryStates:
+    @pytest.mark.parametrize("operation", ["merge", "cherry-pick", "revert"])
+    def test_refuses_while_git_owns_the_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+    ) -> None:
+        repo = diverged_repo(tmp_path / "repo")
+        start_operation(repo, operation)
+        resolve_conflict(repo)
+        llm = scripted_llm([GOOD])
+        use_llm(monkeypatch, llm)
+
+        result = _generate(repo, "--dry-run")
+
+        assert result.exit_code == 1
+        assert f"A {operation} is in progress" in result.stderr
+        assert "git commit" in result.stderr
+        assert llm.calls == []
+
+    def test_rebase_in_progress_proceeds_with_a_note(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = diverged_repo(tmp_path / "repo")
+        start_operation(repo, "rebase")
+        resolve_conflict(repo)
+        use_llm(monkeypatch, scripted_llm(["fix: resolve shared file conflict"]))
+
+        result = _generate(repo, "--dry-run")
+
+        assert result.exit_code == 0
+        assert "A rebase is in progress" in result.stderr
+        assert result.stdout.strip() == "fix: resolve shared file conflict"
+
+    def test_detached_head_warns_before_committing(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run_git(staged_repo, "checkout", "-q", "--detach")
+        use_llm(monkeypatch, scripted_llm([GOOD]))
+
+        result = _generate(staged_repo, "--yes")
+
+        assert result.exit_code == 0
+        assert "HEAD is detached" in result.stderr
+        assert head_message(staged_repo) == GOOD
+
+    def test_detached_head_is_not_mentioned_for_a_dry_run(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run_git(staged_repo, "checkout", "-q", "--detach")
+        use_llm(monkeypatch, scripted_llm([GOOD]))
+
+        result = _generate(staged_repo, "--dry-run")
+
+        assert result.exit_code == 0
+        assert "detached" not in result.stderr
+
+    def test_a_normal_branch_has_no_state_noise(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_llm(monkeypatch, scripted_llm([GOOD]))
+        result = _generate(staged_repo, "--yes")
+        assert "detached" not in result.stderr
+        assert "in progress" not in result.stderr
 
 
 class TestAmend:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 from git_commit_ai.core.config import GitCommitAIConfig
 from git_commit_ai.core.exceptions import (
@@ -11,7 +12,16 @@ from git_commit_ai.core.exceptions import (
     GitTimeoutError,
     NotAGitRepositoryError,
 )
-from git_commit_ai.core.schemas import RepositoryInfo
+from git_commit_ai.core.schemas import RepositoryInfo, RepositoryOperation
+
+# Checked in order; the first marker present names the operation.
+_OPERATION_MARKERS: tuple[tuple[str, RepositoryOperation], ...] = (
+    ("rebase-merge", RepositoryOperation.REBASE),
+    ("rebase-apply", RepositoryOperation.REBASE),
+    ("MERGE_HEAD", RepositoryOperation.MERGE),
+    ("CHERRY_PICK_HEAD", RepositoryOperation.CHERRY_PICK),
+    ("REVERT_HEAD", RepositoryOperation.REVERT),
+)
 
 
 class RepositoryInspector:
@@ -58,6 +68,7 @@ class RepositoryInspector:
             branch=branch,
             is_detached_head=is_detached,
             is_empty=is_empty,
+            operation=self.get_operation_in_progress(),
             staged_files=self.get_staged_files(),
             unstaged_files=self.get_unstaged_files(),
             untracked_files=self.get_untracked_files(),
@@ -86,6 +97,25 @@ class RepositoryInspector:
         """Return ``True`` if HEAD is detached (not on any branch)."""
         _, detached = self._get_branch_info()
         return detached
+
+    def get_operation_in_progress(self) -> RepositoryOperation:
+        """Detect a merge, rebase, cherry-pick or revert waiting to be finished.
+
+        Git records these as files inside the git directory; ``--git-path``
+        resolves them correctly for linked worktrees too. A rebase wins over
+        the others because a conflicted rebase step also leaves
+        ``CHERRY_PICK_HEAD`` behind.
+        """
+        names = [name for name, _ in _OPERATION_MARKERS]
+        args = ["rev-parse"]
+        for name in names:
+            args += ["--git-path", name]
+        paths = self._split_lines(self._run_git(args).stdout)
+        base = Path(self._repo_path)
+        for (_, operation), relative in zip(_OPERATION_MARKERS, paths, strict=True):
+            if (base / relative).exists():
+                return operation
+        return RepositoryOperation.NONE
 
     def empty_tree_hash(self) -> str:
         """Return the hash of the empty tree in this repository's object format.

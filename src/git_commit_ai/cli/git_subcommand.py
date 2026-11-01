@@ -11,6 +11,7 @@ import typer
 
 from git_commit_ai.cli.config_cmd import config
 from git_commit_ai.cli.generate import generate
+from git_commit_ai.cli.hook import hook_app
 
 git_app = typer.Typer(
     name="git-ai-commit",
@@ -19,6 +20,7 @@ git_app = typer.Typer(
 )
 git_app.callback(invoke_without_command=True)(generate)
 git_app.command("config")(config)
+git_app.add_typer(hook_app, name="hook")
 
 
 def git_ai_commit() -> None:

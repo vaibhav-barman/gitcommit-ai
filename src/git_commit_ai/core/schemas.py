@@ -32,6 +32,16 @@ class DiffMode(enum.StrEnum):
     AMEND = "amend"
 
 
+class RepositoryOperation(enum.StrEnum):
+    """A multi-step Git operation that is paused and waiting for a commit."""
+
+    NONE = "none"
+    MERGE = "merge"
+    REBASE = "rebase"
+    CHERRY_PICK = "cherry-pick"
+    REVERT = "revert"
+
+
 class RepositoryInfo(BaseModel):
     """Snapshot of repository-level metadata."""
 
@@ -47,6 +57,10 @@ class RepositoryInfo(BaseModel):
     is_empty: bool = Field(
         default=False,
         description="Whether the repository has zero commits",
+    )
+    operation: RepositoryOperation = Field(
+        default=RepositoryOperation.NONE,
+        description="Merge, rebase, cherry-pick or revert in progress, if any",
     )
     staged_files: list[str] = Field(
         default_factory=list,

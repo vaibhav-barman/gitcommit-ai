@@ -129,3 +129,7 @@ class StaleStagingError(GitCommitAIError):
             "The staged changes changed while the message was being generated, "
             "so nothing was committed. Run the command again."
         )
+
+
+class HookError(GitCommitAIError):
+    """Raised when a Git hook cannot be installed or removed safely."""

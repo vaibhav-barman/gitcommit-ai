@@ -10,7 +10,7 @@ import typer
 from git_commit_ai.agents.graph import CommitMessageGraph
 from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
 from git_commit_ai.core.exceptions import GitCommitAIError
-from git_commit_ai.core.schemas import DiffMode
+from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
 from git_commit_ai.core.settings import load_settings
 from git_commit_ai.git.committer import GitCommitter
 from git_commit_ai.git.diff import DiffExtractor
@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     from git_commit_ai.llm.retry import RetryEvent
 
 _MAX_HINT_CHARS = 1_000
+_GIT_OWNS_THE_MESSAGE = frozenset(
+    {RepositoryOperation.MERGE, RepositoryOperation.CHERRY_PICK, RepositoryOperation.REVERT}
+)
 
 
 def generate(
@@ -80,6 +83,7 @@ def generate(
         config = settings.config
         inspector = RepositoryInspector(repo_path=path, config=config)
         info = inspector.inspect()
+        _check_repository_state(info.operation)
         if amend and info.is_empty:
             _fail("There is no commit to amend.")
         mode = DiffMode.AMEND if amend else DiffMode.STAGED
@@ -111,6 +115,11 @@ def generate(
 
         if dry_run:
             return
+        if info.is_detached_head:
+            _note(
+                "HEAD is detached: the new commit will not belong to any branch.",
+                color=typer.colors.YELLOW,
+            )
         if not yes:
             typer.confirm("Commit with this message?", abort=True, err=True)
         short_hash = GitCommitter(inspector, snapshots).commit(
@@ -119,6 +128,17 @@ def generate(
         _note(f"Committed {short_hash}")
     except GitCommitAIError as exc:
         _fail(str(exc))
+
+
+def _check_repository_state(operation: RepositoryOperation) -> None:
+    """Refuse mid-merge/cherry-pick/revert; note a rebase in progress."""
+    if operation in _GIT_OWNS_THE_MESSAGE:
+        _fail(
+            f"A {operation.value} is in progress. Git has already prepared the commit "
+            "message for it; finish with `git commit` instead."
+        )
+    if operation is RepositoryOperation.REBASE:
+        _note("A rebase is in progress; the message is written for the commit being created.")
 
 
 def _nothing_staged_message(info: RepositoryInfo) -> str:

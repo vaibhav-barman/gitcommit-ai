@@ -31,4 +31,5 @@ def use_llm(monkeypatch: pytest.MonkeyPatch, llm: FakeLLM) -> Created:
         return llm
 
     monkeypatch.setattr("git_commit_ai.cli.generate.create_provider", fake_create)
+    monkeypatch.setattr("git_commit_ai.cli.hook.create_provider", fake_create)
     return created
