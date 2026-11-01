@@ -103,3 +103,32 @@ def test_skips_merge_commits(tmp_path: Path) -> None:
     assert "feat: feature branch commit" in subjects
     assert "feat: base commit" in subjects
     assert len(commits) == 3
+
+
+def test_history_can_start_from_another_revision(tmp_path: Path) -> None:
+    """Starting from an older revision hides everything that came after it."""
+    repo = init_repo(tmp_path / "revision_repo")
+    for index in range(4):
+        commit_file(repo, f"f{index}.txt", str(index), f"feat: add f{index}")
+    extractor = CommitHistoryExtractor(inspector=RepositoryInspector(repo_path=str(repo)))
+
+    assert [c.subject for c in extractor.get_history(revision="HEAD~1")] == [
+        "feat: add f2",
+        "feat: add f1",
+        "feat: add f0",
+    ]
+    assert [c.subject for c in extractor.get_history(revision="HEAD~1", exclude_head=True)] == [
+        "feat: add f1",
+        "feat: add f0",
+    ]
+    assert [c.subject for c in extractor.get_history(count=1, revision="HEAD~2")] == [
+        "feat: add f1"
+    ]
+
+
+def test_history_before_the_root_commit_is_empty(repo_with_initial_commit: Path) -> None:
+    extractor = CommitHistoryExtractor(
+        inspector=RepositoryInspector(repo_path=str(repo_with_initial_commit))
+    )
+    assert extractor.get_history(revision="HEAD^") == []
+    assert extractor.get_history(revision="no-such-revision") == []

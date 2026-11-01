@@ -73,6 +73,7 @@ packages = ["src/git_commit_ai"]
 include = [
     "/src",
     "/tests",
+    "/scripts",
     "/docs",
     "/README.md",
     "/CHANGELOG.md",

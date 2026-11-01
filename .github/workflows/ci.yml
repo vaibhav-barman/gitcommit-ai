@@ -39,7 +39,7 @@ jobs:
           enable-cache: true
       # All extras: the backend tests import every provider SDK (all mocked, no network).
       - run: uv sync --all-extras --python ${{ matrix.python-version }}
-      - run: uv run mypy src tests
+      - run: uv run mypy src tests scripts
       - run: uv run pytest
 
   package:

@@ -38,14 +38,18 @@ class CommitHistoryExtractor:
         self,
         count: int | None = None,
         exclude_head: bool = False,
+        revision: str = "HEAD",
     ) -> list[HistoricalCommit]:
         """Retrieve recent non-merge commits.
 
         Args:
             count: Maximum number of commits to retrieve.
                    Defaults to ``config.history_commit_count``.
-            exclude_head: Start from ``HEAD``'s parent, so the commit about to be
-                   amended is not used as an example of itself.
+            exclude_head: Start from the parent of ``revision`` (``HEAD`` unless
+                   given), so the commit about to be amended is not used as an
+                   example of itself.
+            revision: Where the walk starts, inclusive. Pass a commit's parent to
+                   see only what that commit's author could have seen.
 
         Returns:
             A list of ``HistoricalCommit`` models, most-recent first.
@@ -55,8 +59,8 @@ class CommitHistoryExtractor:
             return []
 
         effective_count = count or self._config.history_commit_count
-        start = "HEAD^" if exclude_head else "HEAD"
-        if exclude_head and not self._has_parent():
+        start = f"{revision}^" if exclude_head else revision
+        if not self._resolves(start):
             return []
 
         # Build a format string with explicit delimiters:
@@ -79,8 +83,10 @@ class CommitHistoryExtractor:
 
         return self._parse_log_output(result.stdout)
 
-    def _has_parent(self) -> bool:
-        result = self._inspector._run_git(["rev-parse", "--verify", "HEAD^"], check=False)
+    def _resolves(self, revision: str) -> bool:
+        result = self._inspector._run_git(
+            ["rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"], check=False
+        )
         return result.returncode == 0
 
     def _parse_log_output(self, raw: str) -> list[HistoricalCommit]:
