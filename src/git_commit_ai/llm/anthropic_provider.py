@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import anthropic
 from anthropic import Anthropic
 
-from git_commit_ai.core.exceptions import LLMError, RateLimitError
+from git_commit_ai.core.exceptions import LLMError, RateLimitError, TransientLLMError
 from git_commit_ai.llm._common import parse_retry_after, require_text, split_system
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class AnthropicProvider:
             raise RateLimitError(self.name, parse_retry_after(exc.response.headers)) from exc
         except anthropic.AuthenticationError as exc:
             raise LLMError("Anthropic rejected the API key") from exc
-        except anthropic.APIConnectionError as exc:
-            raise LLMError(f"Could not reach Anthropic: {exc}") from exc
+        except (anthropic.APIConnectionError, anthropic.InternalServerError) as exc:
+            raise TransientLLMError(self.name, str(exc)) from exc
         text = "".join(block.text for block in response.content if block.type == "text")
         return require_text(self.name, text)

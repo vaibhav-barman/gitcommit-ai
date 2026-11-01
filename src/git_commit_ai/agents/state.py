@@ -97,6 +97,10 @@ class AgentState(BaseModel):
     context: RepositoryContext | None = None
     drafts: list[Draft] = Field(default_factory=list)
     iteration: int = Field(default=0, ge=0, description="Completed generation rounds")
+    interruption: str | None = Field(
+        default=None,
+        description="Provider failure that cut the run short; the best draft so far is used",
+    )
 
     def drafting_inputs(self) -> tuple[DiffDigest, DiffAnalysis, RepositoryContext]:
         """Return the upstream results that generator and critic need.

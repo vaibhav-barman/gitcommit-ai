@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from git_commit_ai.llm.base import LLMProvider
 
 _GENERATOR = "generator"
+_CRITIC = "critic"
 _STEPS_BEFORE_LOOP = 2
 _STEPS_PER_ROUND = 2
 _RECURSION_HEADROOM = 5
@@ -34,15 +35,24 @@ class GenerationResult(BaseModel):
     message: str
     approved: bool
     iterations: int
+    interruption: str | None = None
     state: AgentState
+
+
+def route_after_generator(state: AgentState) -> str:
+    """Go on to the critic, unless the generator was interrupted by a provider error."""
+    return END if state.interruption else _CRITIC
 
 
 def route_after_critic(state: AgentState, max_iterations: int) -> str:
     """Decide whether to stop or regenerate once the critic has spoken.
 
-    The loop ends as soon as a draft is approved, and unconditionally once
-    ``max_iterations`` generation rounds have run, so it always terminates.
+    The loop ends as soon as a draft is approved, when a provider error
+    interrupted the run, and unconditionally once ``max_iterations`` generation
+    rounds have run, so it always terminates.
     """
+    if state.interruption:
+        return END
     critique = state.drafts[-1].critique if state.drafts else None
     if critique is not None and critique.approved:
         return END
@@ -77,20 +87,25 @@ def build_graph(
     """Compile the commit message graph.
 
     Flow: diff_analyst -> context_retrieval -> generator -> critic, then back
-    to generator until the critic approves or the iteration cap is reached.
+    to generator until the critic approves, the iteration cap is reached, or a
+    provider error interrupts a later step.
     """
     graph = StateGraph(AgentState)
     graph.add_node("diff_analyst", make_diff_analyst(llm, config.max_prompt_diff_chars))
     graph.add_node("context_retrieval", make_context_retrieval(engine))
     graph.add_node(_GENERATOR, make_generator(llm))
-    graph.add_node("critic", make_critic(llm))
+    graph.add_node(_CRITIC, make_critic(llm))
 
     graph.add_edge(START, "diff_analyst")
     graph.add_edge("diff_analyst", "context_retrieval")
     graph.add_edge("context_retrieval", _GENERATOR)
-    graph.add_edge(_GENERATOR, "critic")
     graph.add_conditional_edges(
-        "critic",
+        _GENERATOR,
+        route_after_generator,
+        {_CRITIC: _CRITIC, END: END},
+    )
+    graph.add_conditional_edges(
+        _CRITIC,
         lambda state: route_after_critic(state, config.max_iterations),
         {_GENERATOR: _GENERATOR, END: END},
     )
@@ -119,7 +134,9 @@ class CommitMessageGraph:
         """Generate a commit message for ``diff_result``.
 
         If no draft is approved within the cap, the best draft is returned
-        with ``approved=False`` rather than failing.
+        with ``approved=False`` rather than failing. A provider error after the
+        first draft ends the run the same way, with the reason in
+        ``interruption``. An error in the first generation propagates.
         """
         steps = _STEPS_BEFORE_LOOP + _STEPS_PER_ROUND * self._config.max_iterations
         raw = self._graph.invoke(
@@ -128,10 +145,11 @@ class CommitMessageGraph:
         )
         final = AgentState.model_validate(raw)
         best = select_best_draft(final.drafts)
-        approved = best.critique is not None and best.critique.approved
+        reviewed_ok = best.critique is not None and best.critique.approved
         return GenerationResult(
             message=best.message,
-            approved=approved,
+            approved=reviewed_ok and final.interruption is None,
             iterations=final.iteration,
+            interruption=final.interruption,
             state=final,
         )

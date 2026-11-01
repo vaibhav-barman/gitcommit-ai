@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from git_commit_ai.agents.critic_rules import check_draft
 from git_commit_ai.agents.llm_json import complete_json
 from git_commit_ai.agents.state import AgentState, Critique, Severity, Violation
-from git_commit_ai.core.exceptions import AgentStateError, LLMResponseError
+from git_commit_ai.core.exceptions import AgentStateError, LLMError
 from git_commit_ai.llm.base import LLMMessage, Role
 
 if TYPE_CHECKING:
@@ -41,6 +41,11 @@ def make_critic(llm: LLMProvider) -> AgentNode:
     capitalization and punctuation. Only when none of them raise an error does
     the node spend an LLM call on whether the message matches the diff, since
     a draft that must be rewritten anyway does not need that verdict yet.
+
+    If that call fails for any reason (rate limit, timeout, empty or malformed
+    reply) the draft keeps its rule-based verdict, gains a non-blocking
+    ``faithfulness-unchecked`` warning, and the failure is recorded as an
+    interruption rather than aborting the run.
     """
 
     def critic(state: AgentState) -> dict[str, object]:
@@ -50,39 +55,43 @@ def make_critic(llm: LLMProvider) -> AgentNode:
         draft = state.drafts[-1]
 
         critique = Critique(violations=check_draft(draft.message, analysis, context))
+        interruption: str | None = None
         if critique.approved:
-            critique = Critique(
-                violations=[*critique.violations, *_check_faithfulness(llm, digest, draft.message)]
-            )
+            try:
+                extra = _check_faithfulness(llm, digest, draft.message)
+            except LLMError as exc:
+                interruption = f"the message could not be checked against the diff: {exc}"
+                extra = [
+                    Violation(
+                        rule="faithfulness-unchecked",
+                        message=f"Not verified against the diff: {exc}",
+                        severity=Severity.WARNING,
+                    )
+                ]
+            critique = Critique(violations=[*critique.violations, *extra])
 
         reviewed = draft.model_copy(update={"critique": critique})
-        return {"drafts": [*state.drafts[:-1], reviewed]}
+        update: dict[str, object] = {"drafts": [*state.drafts[:-1], reviewed]}
+        if interruption is not None:
+            update["interruption"] = interruption
+        return update
 
     return critic
 
 
 def _check_faithfulness(llm: LLMProvider, digest: DiffDigest, message: str) -> list[Violation]:
     system = _SYSTEM_PROMPT + (_TRUNCATION_NOTE if digest.was_truncated else "")
-    try:
-        verdict = complete_json(
-            llm,
-            [
-                LLMMessage(role=Role.SYSTEM, content=system),
-                LLMMessage(
-                    role=Role.USER,
-                    content=f"Staged diff:\n{digest.text}\n\nCommit message:\n{message}",
-                ),
-            ],
-            _Faithfulness,
-        )
-    except LLMResponseError:
-        return [
-            Violation(
-                rule="faithfulness-unchecked",
-                message="The model's faithfulness verdict could not be parsed.",
-                severity=Severity.WARNING,
-            )
-        ]
+    verdict = complete_json(
+        llm,
+        [
+            LLMMessage(role=Role.SYSTEM, content=system),
+            LLMMessage(
+                role=Role.USER,
+                content=f"Staged diff:\n{digest.text}\n\nCommit message:\n{message}",
+            ),
+        ],
+        _Faithfulness,
+    )
     if verdict.faithful:
         return []
     problems = verdict.problems or ["The message does not accurately describe the diff."]

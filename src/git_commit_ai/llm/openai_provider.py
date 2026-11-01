@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 import openai
 from openai import OpenAI
 
-from git_commit_ai.core.exceptions import LLMError, RateLimitError
+from git_commit_ai.core.exceptions import LLMError, RateLimitError, TransientLLMError
 from git_commit_ai.llm._common import parse_retry_after, require_text
 
 if TYPE_CHECKING:
@@ -56,6 +56,6 @@ class OpenAIProvider:
             raise RateLimitError(self.name, parse_retry_after(exc.response.headers)) from exc
         except openai.AuthenticationError as exc:
             raise LLMError("OpenAI rejected the API key") from exc
-        except openai.APIConnectionError as exc:
-            raise LLMError(f"Could not reach OpenAI: {exc}") from exc
+        except (openai.APIConnectionError, openai.InternalServerError) as exc:
+            raise TransientLLMError(self.name, str(exc)) from exc
         return require_text(self.name, response.choices[0].message.content)

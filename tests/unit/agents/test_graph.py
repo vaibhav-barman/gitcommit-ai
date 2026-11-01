@@ -11,11 +11,18 @@ from git_commit_ai.agents.graph import (
     CommitMessageGraph,
     GenerationResult,
     route_after_critic,
+    route_after_generator,
     select_best_draft,
 )
 from git_commit_ai.agents.state import AgentState, Critique, Draft, Severity, Violation
 from git_commit_ai.core.config import GitCommitAIConfig
-from git_commit_ai.core.exceptions import AgentStateError, LLMResponseError
+from git_commit_ai.core.exceptions import (
+    AgentStateError,
+    LLMError,
+    LLMResponseError,
+    RateLimitError,
+    TransientLLMError,
+)
 from git_commit_ai.core.schemas import HistoricalCommit
 from git_commit_ai.llm import FakeLLM
 from tests.fixtures.agent_inputs import SCOPED_HISTORY, make_state
@@ -62,6 +69,17 @@ class TestRouting:
     def test_cap_of_one_never_loops(self) -> None:
         state = _state_with([_draft(1, Severity.ERROR)])
         assert route_after_critic(state, max_iterations=1) == END
+
+    def test_interruption_ends_the_loop_even_with_rounds_left(self) -> None:
+        state = _state_with([_draft(1, Severity.ERROR)]).model_copy(
+            update={"interruption": "provider down"}
+        )
+        assert route_after_critic(state, max_iterations=5) == END
+
+    def test_generator_hands_over_to_the_critic_unless_interrupted(self) -> None:
+        state = _state_with([_draft(1, reviewed=False)])
+        assert route_after_generator(state) == "critic"
+        assert route_after_generator(state.model_copy(update={"interruption": "x"})) == END
 
     def test_iteration_beyond_the_cap_still_ends(self) -> None:
         state = _state_with([_draft(1, Severity.ERROR)], iteration=9)
@@ -155,3 +173,65 @@ class TestGraphRuns:
     def test_llm_failure_propagates(self) -> None:
         with pytest.raises(LLMResponseError):
             self._run(scripted_llm([]))
+
+
+_ERRORS = [
+    RateLimitError("openai", retry_after=30),
+    TransientLLMError("openai", "request timed out"),
+    LLMResponseError("empty response"),
+]
+_ERROR_IDS = ["rate-limit", "timeout", "empty-response"]
+
+
+class TestDegradation:
+    def _run(self, llm: FakeLLM) -> GenerationResult:
+        graph = CommitMessageGraph(llm, GitCommitAIConfig(max_iterations=3))
+        return graph.run(make_diff({"src/api/client.py": 6}), HISTORY)
+
+    @pytest.mark.parametrize("error", _ERRORS, ids=_ERROR_IDS)
+    def test_critic_failure_returns_the_draft_with_an_interruption(self, error: LLMError) -> None:
+        result = self._run(scripted_llm([GOOD], verdict_errors={1: error}))
+        assert result.message == GOOD
+        assert not result.approved
+        assert result.iterations == 1
+        assert result.interruption is not None
+        assert "could not be checked against the diff" in result.interruption
+
+    @pytest.mark.parametrize("error", _ERRORS, ids=_ERROR_IDS)
+    def test_later_generation_failure_returns_the_best_draft_so_far(self, error: LLMError) -> None:
+        llm = scripted_llm(["feat(api): added page size"], generator_errors={2: error})
+        result = self._run(llm)
+        assert result.message == "feat(api): added page size"
+        assert not result.approved
+        assert result.iterations == 1
+        assert result.interruption is not None
+        assert "round 2 could not be generated" in result.interruption
+
+    def test_failure_in_a_later_round_keeps_the_better_earlier_draft(self) -> None:
+        unfaithful = json.dumps({"faithful": False, "problems": ["Mentions caching"]})
+        llm = scripted_llm(
+            [GOOD, "feat(api): add page size limit"],
+            verdicts=[unfaithful],
+            verdict_errors={2: RateLimitError("openai")},
+        )
+        result = self._run(llm)
+        # Round 2 passed every rule and only lacks the faithfulness verdict, so it
+        # outranks round 1, which the verdict rejected.
+        assert result.message == "feat(api): add page size limit"
+        assert result.iterations == 2
+        assert result.interruption is not None
+
+    @pytest.mark.parametrize("error", _ERRORS, ids=_ERROR_IDS)
+    def test_first_generation_failure_aborts(self, error: LLMError) -> None:
+        with pytest.raises(type(error)):
+            self._run(scripted_llm([], generator_errors={1: error}))
+
+    @pytest.mark.parametrize("error", _ERRORS, ids=_ERROR_IDS)
+    def test_diff_analyst_failure_aborts(self, error: LLMError) -> None:
+        with pytest.raises(type(error)):
+            self._run(scripted_llm([GOOD], analysis_error=error))
+
+    def test_a_healthy_run_reports_no_interruption(self) -> None:
+        result = self._run(scripted_llm([GOOD]))
+        assert result.interruption is None
+        assert result.approved

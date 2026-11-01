@@ -10,7 +10,13 @@ from git_commit_ai.agents.generator import (
     make_generator,
 )
 from git_commit_ai.agents.state import AgentState, Critique, Draft, Severity, Violation
-from git_commit_ai.core.exceptions import AgentStateError
+from git_commit_ai.core.exceptions import (
+    AgentStateError,
+    LLMError,
+    LLMResponseError,
+    RateLimitError,
+    TransientLLMError,
+)
 from git_commit_ai.core.schemas import CommitConvention
 from git_commit_ai.llm import FakeLLM, Role
 from tests.fixtures.agent_inputs import (
@@ -155,3 +161,38 @@ def test_node_requires_upstream_results() -> None:
 )
 def test_clean_message(reply: str, expected: str) -> None:
     assert clean_message(reply) == expected
+
+
+_PROVIDER_ERRORS = [
+    RateLimitError("openai"),
+    TransientLLMError("openai", "request timed out"),
+    LLMResponseError("empty response"),
+]
+
+
+class _Failing:
+    name = "failing"
+    model = "failing-1"
+
+    def __init__(self, error: LLMError) -> None:
+        self._error = error
+
+    def complete(self, messages: object) -> str:
+        raise self._error
+
+
+@pytest.mark.parametrize("error", _PROVIDER_ERRORS, ids=["rate-limit", "timeout", "empty"])
+def test_first_round_provider_failure_aborts(error: LLMError) -> None:
+    with pytest.raises(type(error)):
+        make_generator(_Failing(error))(make_state(SCOPED_HISTORY))
+
+
+@pytest.mark.parametrize("error", _PROVIDER_ERRORS, ids=["rate-limit", "timeout", "empty"])
+def test_later_round_provider_failure_is_recorded_not_raised(error: LLMError) -> None:
+    state = make_state(SCOPED_HISTORY).model_copy(
+        update={"drafts": [Draft(message="old", iteration=1, critique=Critique())], "iteration": 1}
+    )
+    update = make_generator(_Failing(error))(state)
+    assert set(update) == {"interruption"}
+    assert "round 2 could not be generated" in str(update["interruption"])
+    assert str(error) in str(update["interruption"])

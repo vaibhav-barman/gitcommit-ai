@@ -100,6 +100,15 @@ class RateLimitError(LLMError):
         self.retry_after = retry_after
 
 
+class TransientLLMError(LLMError):
+    """Raised for failures that usually clear up on retry: timeouts, dropped
+    connections, and server-side (5xx) errors."""
+
+    def __init__(self, provider: str, detail: str) -> None:
+        super().__init__(f"Temporary failure talking to {provider}: {detail}")
+        self.provider = provider
+
+
 class LLMResponseError(LLMError):
     """Raised when a provider returns an empty, malformed, or unusable response."""
 

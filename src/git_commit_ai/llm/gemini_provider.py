@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 from google import genai
 from google.genai import errors, types
 
-from git_commit_ai.core.exceptions import LLMError, RateLimitError
+from git_commit_ai.core.exceptions import LLMError, RateLimitError, TransientLLMError
 from git_commit_ai.llm._common import require_text, split_system
 
 if TYPE_CHECKING:
@@ -63,8 +64,12 @@ class GeminiProvider:
                 contents=contents,
                 config=config,
             )
+        except httpx.TransportError as exc:
+            raise TransientLLMError(self.name, str(exc) or type(exc).__name__) from exc
         except errors.APIError as exc:
             if exc.code == _RATE_LIMITED:
                 raise RateLimitError(self.name) from exc
+            if isinstance(exc, errors.ServerError):
+                raise TransientLLMError(self.name, f"HTTP {exc.code}") from exc
             raise LLMError(f"Gemini request failed ({exc.code}): {exc.message}") from exc
         return require_text(self.name, response.text)

@@ -9,12 +9,14 @@ from typing import TYPE_CHECKING
 
 from git_commit_ai.core.config import ProviderName
 from git_commit_ai.core.exceptions import MissingAPIKeyError, ProviderNotInstalledError
+from git_commit_ai.llm.retry import RetryingProvider, RetryPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from git_commit_ai.core.config import GitCommitAIConfig
     from git_commit_ai.llm.base import LLMProvider
+    from git_commit_ai.llm.retry import RetryEvent
 
 
 @dataclass(frozen=True)
@@ -66,8 +68,12 @@ _BACKENDS: dict[ProviderName, _BackendSpec] = {
 def create_provider(
     config: GitCommitAIConfig,
     env: Mapping[str, str] | None = None,
+    on_retry: Callable[[RetryEvent], None] | None = None,
 ) -> LLMProvider:
     """Instantiate the backend selected by ``config.llm_provider``.
+
+    The backend is wrapped so rate limits and transient errors are retried
+    with bounded exponential backoff (see the ``llm_*retr*`` settings).
 
     Backend modules are imported lazily so that a missing optional SDK only
     affects the provider that needs it.
@@ -75,6 +81,7 @@ def create_provider(
     Args:
         config: Application configuration (provider, model, temperature, timeout).
         env: Environment to read API keys from; defaults to ``os.environ``.
+        on_retry: Called before each retry wait, for progress reporting.
 
     Raises:
         MissingAPIKeyError: If the provider needs a key and none is set.
@@ -96,10 +103,15 @@ def create_provider(
         raise ProviderNotInstalledError(config.llm_provider.value, spec.extra) from exc
 
     backend_class = getattr(module, spec.class_name)
-    provider: LLMProvider = backend_class(
+    backend: LLMProvider = backend_class(
         model=model,
         temperature=config.llm_temperature,
         timeout=config.llm_timeout_seconds,
         **{spec.credential_arg: credential},
     )
-    return provider
+    policy = RetryPolicy(
+        max_retries=config.llm_max_retries,
+        base_delay=config.llm_retry_base_delay_seconds,
+        max_delay=config.llm_retry_max_delay_seconds,
+    )
+    return RetryingProvider(backend, policy, on_retry)

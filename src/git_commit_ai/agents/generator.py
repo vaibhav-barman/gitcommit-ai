@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from git_commit_ai.agents.conventions import HARD_SUBJECT_LIMIT, effective_convention
 from git_commit_ai.agents.state import AgentState, CommitType, Draft
+from git_commit_ai.core.exceptions import LLMError
 from git_commit_ai.core.schemas import CommitConvention
 from git_commit_ai.llm.base import LLMMessage, Role
 
@@ -32,11 +33,20 @@ def make_generator(llm: LLMProvider) -> AgentNode:
     Each call appends one ``Draft`` and advances the iteration counter. When
     earlier drafts were critiqued, the latest draft and its violations are
     included so the model revises instead of starting over.
+
+    A provider failure in the first round propagates, since there is nothing
+    to show. In a later round it is recorded as an interruption so the run
+    ends with the best draft so far instead of losing it.
     """
 
     def generator(state: AgentState) -> dict[str, object]:
         digest, analysis, context = state.drafting_inputs()
-        reply = llm.complete(build_generator_messages(digest, analysis, context, state.drafts))
+        try:
+            reply = llm.complete(build_generator_messages(digest, analysis, context, state.drafts))
+        except LLMError as exc:
+            if not state.drafts:
+                raise
+            return {"interruption": f"round {state.iteration + 1} could not be generated: {exc}"}
         iteration = state.iteration + 1
         draft = Draft(message=clean_message(reply), iteration=iteration)
         return {"drafts": [*state.drafts, draft], "iteration": iteration}

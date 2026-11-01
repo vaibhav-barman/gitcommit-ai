@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from git_commit_ai.core.exceptions import ConfigurationError
 from git_commit_ai.core.schemas import DiffMode
@@ -29,6 +29,9 @@ _ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_TEMPERATURE": "llm_temperature",
     "GITCOMMIT_AI_TIMEOUT": "llm_timeout_seconds",
     "GITCOMMIT_AI_OLLAMA_URL": "ollama_base_url",
+    "GITCOMMIT_AI_MAX_RETRIES": "llm_max_retries",
+    "GITCOMMIT_AI_RETRY_BASE_DELAY": "llm_retry_base_delay_seconds",
+    "GITCOMMIT_AI_RETRY_MAX_DELAY": "llm_retry_max_delay_seconds",
     "GITCOMMIT_AI_MAX_ITERATIONS": "max_iterations",
     "GITCOMMIT_AI_MAX_DIFF_CHARS": "max_prompt_diff_chars",
 }
@@ -81,6 +84,22 @@ class GitCommitAIConfig(BaseModel):
         gt=0,
         description="Timeout in seconds for a single LLM request",
     )
+    llm_max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Retries after a rate limit or transient error (0 disables retrying)",
+    )
+    llm_retry_base_delay_seconds: float = Field(
+        default=1.0,
+        ge=0,
+        description="Delay before the first retry; doubles on each further retry",
+    )
+    llm_retry_max_delay_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Longest wait before any retry; a longer retry-after is not waited out",
+    )
     ollama_base_url: str = Field(
         default="http://localhost:11434",
         description="Base URL of the Ollama server",
@@ -96,6 +115,12 @@ class GitCommitAIConfig(BaseModel):
         ge=1_000,
         description="Character budget for diff content included in LLM prompts",
     )
+
+    @model_validator(mode="after")
+    def _check_retry_delays(self) -> GitCommitAIConfig:
+        if self.llm_retry_base_delay_seconds > self.llm_retry_max_delay_seconds:
+            raise ValueError("retry base delay must not exceed the retry max delay")
+        return self
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> GitCommitAIConfig:

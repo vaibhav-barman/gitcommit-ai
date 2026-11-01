@@ -8,9 +8,16 @@ import pytest
 
 from git_commit_ai.agents.critic import make_critic
 from git_commit_ai.agents.state import AgentState, Draft, Severity
-from git_commit_ai.core.exceptions import AgentStateError
+from git_commit_ai.core.exceptions import (
+    AgentStateError,
+    LLMError,
+    LLMResponseError,
+    RateLimitError,
+    TransientLLMError,
+)
 from git_commit_ai.llm import FakeLLM
 from tests.fixtures.agent_inputs import SCOPED_HISTORY, make_state
+from tests.fixtures.scripted_llm import scripted_llm
 
 GOOD = "feat(api): add page size option"
 FAITHFUL = json.dumps({"faithful": True, "problems": []})
@@ -114,3 +121,34 @@ def test_only_the_latest_draft_is_reviewed() -> None:
 def test_requires_a_draft() -> None:
     with pytest.raises(AgentStateError, match="drafts"):
         make_critic(FakeLLM([]))(make_state(SCOPED_HISTORY))
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RateLimitError("openai", retry_after=30),
+        TransientLLMError("openai", "request timed out"),
+        LLMResponseError("Provider 'openai' returned an empty response"),
+        LLMError("rejected the API key"),
+    ],
+    ids=["rate-limit", "timeout", "empty-response", "other"],
+)
+def test_provider_failure_keeps_the_draft_and_records_an_interruption(error: LLMError) -> None:
+    llm = scripted_llm([], verdict_errors={1: error})
+    update = make_critic(llm)(_with_drafts(make_state(SCOPED_HISTORY), GOOD))
+
+    drafts = update["drafts"]
+    assert isinstance(drafts, list)
+    critique = drafts[-1].critique
+    assert critique is not None
+    assert critique.approved
+    assert [(v.rule, v.severity) for v in critique.violations] == [
+        ("faithfulness-unchecked", Severity.WARNING)
+    ]
+    assert str(error) in critique.violations[0].message
+    assert "could not be checked against the diff" in str(update["interruption"])
+
+
+def test_no_interruption_when_the_check_succeeds() -> None:
+    update = make_critic(FakeLLM([FAITHFUL]))(_with_drafts(make_state(SCOPED_HISTORY), GOOD))
+    assert "interruption" not in update

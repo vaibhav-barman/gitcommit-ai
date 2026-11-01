@@ -82,3 +82,29 @@ class TestLLMConfig:
     def test_from_env_rejects_out_of_range_iterations(self) -> None:
         with pytest.raises(ConfigurationError, match="GITCOMMIT_AI_MAX_ITERATIONS"):
             GitCommitAIConfig.from_env({"GITCOMMIT_AI_MAX_ITERATIONS": "0"})
+
+
+class TestRetryConfig:
+    def test_defaults(self) -> None:
+        config = GitCommitAIConfig()
+        assert (config.llm_max_retries, config.llm_retry_base_delay_seconds) == (3, 1.0)
+        assert config.llm_retry_max_delay_seconds == 30.0
+
+    def test_from_env(self) -> None:
+        config = GitCommitAIConfig.from_env(
+            {
+                "GITCOMMIT_AI_MAX_RETRIES": "5",
+                "GITCOMMIT_AI_RETRY_BASE_DELAY": "0.5",
+                "GITCOMMIT_AI_RETRY_MAX_DELAY": "10",
+            }
+        )
+        assert config.llm_max_retries == 5
+        assert config.llm_retry_base_delay_seconds == 0.5
+        assert config.llm_retry_max_delay_seconds == 10
+
+    def test_retries_can_be_disabled(self) -> None:
+        assert GitCommitAIConfig.from_env({"GITCOMMIT_AI_MAX_RETRIES": "0"}).llm_max_retries == 0
+
+    def test_base_delay_may_not_exceed_max_delay(self) -> None:
+        with pytest.raises(ValidationError, match="base delay"):
+            GitCommitAIConfig(llm_retry_base_delay_seconds=60, llm_retry_max_delay_seconds=30)

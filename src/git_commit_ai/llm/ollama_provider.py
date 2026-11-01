@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 import ollama
 from ollama import Client
 
-from git_commit_ai.core.exceptions import LLMError, OllamaUnreachableError, RateLimitError
+from git_commit_ai.core.exceptions import (
+    LLMError,
+    OllamaUnreachableError,
+    RateLimitError,
+    TransientLLMError,
+)
 from git_commit_ai.llm._common import require_text
 
 if TYPE_CHECKING:
@@ -16,6 +22,7 @@ if TYPE_CHECKING:
     from git_commit_ai.llm.base import LLMMessage
 
 _RATE_LIMITED = 429
+_SERVER_ERROR = 500
 
 
 class OllamaProvider:
@@ -51,8 +58,12 @@ class OllamaProvider:
             )
         except ConnectionError as exc:
             raise OllamaUnreachableError(self._base_url) from exc
+        except httpx.TimeoutException as exc:
+            raise TransientLLMError(self.name, "request timed out") from exc
         except ollama.ResponseError as exc:
             if exc.status_code == _RATE_LIMITED:
                 raise RateLimitError(self.name) from exc
+            if exc.status_code >= _SERVER_ERROR:
+                raise TransientLLMError(self.name, f"HTTP {exc.status_code}") from exc
             raise LLMError(f"Ollama request failed ({exc.status_code}): {exc.error}") from exc
         return require_text(self.name, response.message.content)

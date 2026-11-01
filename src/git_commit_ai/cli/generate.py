@@ -21,6 +21,7 @@ from git_commit_ai.llm import create_provider
 if TYPE_CHECKING:
     from git_commit_ai.agents.graph import GenerationResult
     from git_commit_ai.core.schemas import DiffResult, RepositoryInfo
+    from git_commit_ai.llm.retry import RetryEvent
 
 
 def generate(
@@ -61,7 +62,7 @@ def generate(
         snapshots = SnapshotManager(inspector, config)
         snapshot = snapshots.capture()
 
-        llm = create_provider(config)
+        llm = create_provider(config, on_retry=_announce_retry)
         _note(f"Generating a commit message with {llm.name}/{llm.model}...")
         result = CommitMessageGraph(llm, config).run(diff, history)
 
@@ -153,15 +154,28 @@ def _report_verbose(result: GenerationResult) -> None:
 
 
 def _report_review(result: GenerationResult) -> None:
-    if result.approved:
+    if result.interruption:
+        _note(
+            f"Stopped early: {result.interruption}. Showing the best draft so far.",
+            color=typer.colors.YELLOW,
+        )
+    elif not result.approved:
+        _note(
+            f"No draft passed review after {result.iterations} round(s); showing the best one.",
+            color=typer.colors.YELLOW,
+        )
+    else:
         return
-    _note(
-        f"No draft passed review after {result.iterations} round(s); showing the best one.",
-        color=typer.colors.YELLOW,
-    )
     best = next((d for d in result.state.drafts if d.message == result.message), None)
     for violation in best.critique.violations if best and best.critique else []:
         _note(f"  - {violation.rule}: {violation.message}", color=typer.colors.YELLOW)
+
+
+def _announce_retry(event: RetryEvent) -> None:
+    _note(
+        f"{event.error} Retrying in {event.delay:.0f}s ({event.retry}/{event.max_retries})...",
+        color=typer.colors.YELLOW,
+    )
 
 
 def _note(text: str, color: str | None = None) -> None:

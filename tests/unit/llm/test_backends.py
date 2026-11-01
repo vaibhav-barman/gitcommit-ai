@@ -17,6 +17,7 @@ from git_commit_ai.core.exceptions import (
     LLMResponseError,
     OllamaUnreachableError,
     RateLimitError,
+    TransientLLMError,
 )
 from git_commit_ai.llm import LLMMessage, Role
 from git_commit_ai.llm.anthropic_provider import AnthropicProvider
@@ -76,11 +77,34 @@ class TestOpenAIProvider:
             self._provider(client).complete(CONVERSATION)
         assert info.value.retry_after == 7
 
-    def test_connection_error_maps_to_llm_error(self) -> None:
+    def test_connection_error_is_transient(self) -> None:
         client = MagicMock()
         client.chat.completions.create.side_effect = openai.APIConnectionError(request=_REQUEST)
-        with pytest.raises(LLMError, match="Could not reach OpenAI"):
+        with pytest.raises(TransientLLMError, match="openai"):
             self._provider(client).complete(CONVERSATION)
+
+    def test_timeout_is_transient(self) -> None:
+        client = MagicMock()
+        client.chat.completions.create.side_effect = openai.APITimeoutError(request=_REQUEST)
+        with pytest.raises(TransientLLMError):
+            self._provider(client).complete(CONVERSATION)
+
+    def test_server_error_is_transient(self) -> None:
+        client = MagicMock()
+        client.chat.completions.create.side_effect = openai.InternalServerError(
+            "boom", response=httpx.Response(503, request=_REQUEST), body=None
+        )
+        with pytest.raises(TransientLLMError):
+            self._provider(client).complete(CONVERSATION)
+
+    def test_bad_key_is_not_transient(self) -> None:
+        client = MagicMock()
+        client.chat.completions.create.side_effect = openai.AuthenticationError(
+            "no", response=httpx.Response(401, request=_REQUEST), body=None
+        )
+        with pytest.raises(LLMError) as info:
+            self._provider(client).complete(CONVERSATION)
+        assert not isinstance(info.value, TransientLLMError)
 
 
 class TestAnthropicProvider:
@@ -118,6 +142,19 @@ class TestAnthropicProvider:
             self._provider(client).complete(CONVERSATION)
         assert info.value.retry_after == 7
 
+    def test_connection_and_server_errors_are_transient(self) -> None:
+        for error in (
+            anthropic.APIConnectionError(request=_REQUEST),
+            anthropic.APITimeoutError(request=_REQUEST),
+            anthropic.InternalServerError(
+                "overloaded", response=httpx.Response(529, request=_REQUEST), body=None
+            ),
+        ):
+            client = MagicMock()
+            client.messages.create.side_effect = error
+            with pytest.raises(TransientLLMError):
+                self._provider(client).complete(CONVERSATION)
+
     def test_empty_response_raises(self) -> None:
         client = MagicMock()
         client.messages.create.return_value.content = []
@@ -152,13 +189,28 @@ class TestGeminiProvider:
         with pytest.raises(RateLimitError):
             self._provider(client).complete(CONVERSATION)
 
-    def test_other_api_errors_map_to_llm_error(self) -> None:
+    def test_server_errors_are_transient(self) -> None:
         client = MagicMock()
         client.models.generate_content.side_effect = genai_errors.ServerError(
-            500, {"error": {"message": "boom"}}
+            503, {"error": {"message": "unavailable"}}
         )
-        with pytest.raises(LLMError, match="500"):
+        with pytest.raises(TransientLLMError, match="503"):
             self._provider(client).complete(CONVERSATION)
+
+    def test_network_failures_are_transient(self) -> None:
+        client = MagicMock()
+        client.models.generate_content.side_effect = httpx.ReadTimeout("slow")
+        with pytest.raises(TransientLLMError):
+            self._provider(client).complete(CONVERSATION)
+
+    def test_other_client_errors_are_not_transient(self) -> None:
+        client = MagicMock()
+        client.models.generate_content.side_effect = genai_errors.ClientError(
+            400, {"error": {"message": "bad request"}}
+        )
+        with pytest.raises(LLMError, match="400") as info:
+            self._provider(client).complete(CONVERSATION)
+        assert not isinstance(info.value, TransientLLMError)
 
 
 class TestOllamaProvider:
@@ -184,6 +236,16 @@ class TestOllamaProvider:
         client.chat.side_effect = ConnectionError("refused")
         with pytest.raises(OllamaUnreachableError, match="localhost:11434"):
             self._provider(client).complete(CONVERSATION)
+
+    def test_timeout_and_server_errors_are_transient(self) -> None:
+        for error in (
+            httpx.ReadTimeout("slow"),
+            ollama.ResponseError("loading model", status_code=503),
+        ):
+            client = MagicMock()
+            client.chat.side_effect = error
+            with pytest.raises(TransientLLMError):
+                self._provider(client).complete(CONVERSATION)
 
     def test_response_error_maps_to_llm_error(self) -> None:
         client = MagicMock()

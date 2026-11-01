@@ -11,7 +11,9 @@ from typer.testing import CliRunner
 
 from git_commit_ai.cli.generate import git_ai_commit
 from git_commit_ai.cli.main import app
+from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
 from git_commit_ai.llm import FakeLLM
+from git_commit_ai.llm.retry import RetryEvent
 from tests.fixtures.git_repo import (
     commit_count,
     head_message,
@@ -52,7 +54,7 @@ def _use(monkeypatch: pytest.MonkeyPatch, llm: FakeLLM) -> list[GitCommitAIConfi
     """Make the CLI use ``llm`` and record the configs it was created with."""
     seen: list[GitCommitAIConfig] = []
 
-    def fake_create(config: GitCommitAIConfig) -> FakeLLM:
+    def fake_create(config: GitCommitAIConfig, **_: object) -> FakeLLM:
         seen.append(config)
         return llm
 
@@ -113,6 +115,65 @@ class TestOutput:
         assert "No draft passed review after 2 round(s)" in result.stderr
         assert "imperative-mood" in result.stderr
         assert result.stdout.strip() in {"Added orders", "Added orders again"}
+
+
+class TestDegradation:
+    def test_critic_failure_warns_and_still_offers_the_draft(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")})
+        _use(monkeypatch, llm)
+
+        result = _generate(staged_repo, "--dry-run")
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == GOOD
+        assert "Stopped early" in result.stderr
+        assert "could not be checked against the diff" in result.stderr
+        assert "Showing the best draft so far" in result.stderr
+
+    def test_later_round_failure_shows_the_best_draft_so_far(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm(
+            ["Added orders endpoint"],
+            generator_errors={2: TransientLLMError("openai", "request timed out")},
+        )
+        _use(monkeypatch, llm)
+
+        result = _generate(staged_repo, "--dry-run")
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == "Added orders endpoint"
+        assert "round 2 could not be generated" in result.stderr
+        assert "imperative-mood" in result.stderr
+
+    def test_first_generation_failure_aborts_with_a_clean_error(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm([], generator_errors={1: RateLimitError("openai")})
+        _use(monkeypatch, llm)
+
+        result = _generate(staged_repo, "--dry-run")
+
+        assert result.exit_code == 1
+        assert "rate limit" in result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_retries_are_announced(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def announce(config: GitCommitAIConfig, on_retry: object = None, **_: object) -> FakeLLM:
+            assert callable(on_retry)
+            on_retry(RetryEvent("openai", 1, 3, 2.0, RateLimitError("openai")))
+            return scripted_llm([GOOD])
+
+        monkeypatch.setattr("git_commit_ai.cli.generate.create_provider", announce)
+
+        result = _generate(staged_repo, "--dry-run")
+
+        assert result.exit_code == 0
+        assert "Retrying in 2s (1/3)" in result.stderr
 
 
 class TestCommitting:
