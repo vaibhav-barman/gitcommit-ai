@@ -1,6 +1,7 @@
 # GitCommit AI
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/vaibhav-barman/gitcommit-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/vaibhav-barman/gitcommit-ai/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/package%20manager-uv-blueviolet.svg)](https://github.com/astral-sh/uv)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg)](http://mypy-lang.org/)
@@ -23,7 +24,7 @@ Modern software changes are complex, cross-cutting, and full of context that sim
 - **Staleness Guarding**: Tree-hash snapshotting ensures that any changes staged while generation is underway abort or trigger re-analysis before any commit can occur.
 - **Hybrid Cloud / Local LLM Inference**: Pluggable backend support for OpenAI, Anthropic, Google Gemini, Ollama, and local llama.cpp servers.
 
-> **Current Milestone**: Phases 1–3 are complete. Repository inspection, diff extraction, commit normalization, statistical convention detection, style profiling, and example retrieval (Phases 1 and 2) run 100% deterministically with zero LLM dependencies. Phase 3 adds the LangGraph agent graph, four pluggable LLM backends, and the `generate` command; LLM calls happen only inside `git_commit_ai.agents`.
+> **Current Milestone**: Phases 1–4 are complete. Repository inspection, diff extraction, commit normalization, statistical convention detection, style profiling, and example retrieval (Phases 1 and 2) run 100% deterministically with zero LLM dependencies. Phase 3 adds the LangGraph agent graph, four pluggable LLM backends, and the `generate` command; LLM calls happen only inside `git_commit_ai.agents`. Phase 4 hardens it for daily use: retries and graceful degradation, `.env` support, message bodies, `--amend`, a commit hook, and CI.
 
 ---
 
@@ -88,6 +89,13 @@ Modern software changes are complex, cross-cutting, and full of context that sim
   - *Reflection loop*: generate → critique → regenerate, capped by `max_iterations`, falling back to the best draft.
 - **Safe committing (`GitCommitter`)**: re-checks the staged tree against a snapshot taken before generation and refuses to commit if it changed.
 
+### 4. Hardening (Phase 4)
+- **Resilience**: rate limits and transient errors (timeouts, dropped connections, 5xx) are retried with bounded exponential backoff. If a provider still fails after the first draft exists, you get the best draft so far with a visible warning instead of an error.
+- **Settings**: flags > environment > `.env` > defaults, with a `config` command that shows where each value came from and masks secrets.
+- **Quality**: `--hint` passes your intent to the model; a short body wrapped at 72 columns is generated when the repo uses bodies or the diff is large, and the critic checks it.
+- **Git workflows**: `--amend`, `--no-verify`, a `prepare-commit-msg` hook installer that backs up and chains existing hooks, and sensible behavior during merges, rebases, and on a detached `HEAD`.
+- **Release readiness**: GitHub Actions CI (Ruff, mypy, pytest on Python 3.11–3.13, a build smoke test), a typed package (`py.typed`), `LICENSE`, `CONTRIBUTING.md`, and a `CHANGELOG.md`.
+
 ---
 
 ## 🛠️ Installation & Setup
@@ -96,7 +104,7 @@ GitCommit AI uses [uv](https://github.com/astral-sh/uv) for fast, deterministic 
 
 ### Prerequisites
 
-- Python 3.12 or newer
+- Python 3.11 or newer
 - [uv](https://github.com/astral-sh/uv) installed (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `brew install uv`)
 - Git installed and accessible on your `PATH`
 
@@ -128,11 +136,32 @@ uv sync --all-extras        # every provider
 | Gemini | `gemini` | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
 | Ollama | `ollama` | none (local server) | `llama3.1` |
 
-Using a provider whose extra is not installed fails with the exact `pip install 'gitcommit-ai[...]'` command to run.
+Using a provider whose extra is not installed fails with the exact command to run (`pip install 'gitcommit-ai[...]'`, or `pipx install --force 'gitcommit-ai[...]'` for a pipx install).
 
 ### Configuration
 
-Settings come from environment variables; command-line flags override them. See [`.env.example`](.env.example) for the full list. The CLI does **not** load `.env` files, so export the variables yourself (`set -a; source .env; set +a`).
+Settings are resolved in this order, highest priority first:
+
+1. **Command-line flags** (`--provider`, `--model`, `--max-iterations`)
+2. **Environment variables**
+3. **A `.env` file**: the nearest one found walking up from the current directory
+4. **Defaults**
+
+The `.env` file is parsed into memory only; it is never exported into the process environment. Set `GITCOMMIT_AI_ENV_FILE` to use a specific file, or to an empty string to skip `.env` loading. Blank values count as unset. See [`.env.example`](https://github.com/vaibhav-barman/gitcommit-ai/blob/main/.env.example) for a template, and run `git-ai-commit config` to see what is in effect:
+
+```text
+$ git-ai-commit config
+Effective settings
+  Precedence: flags > environment > .env > defaults
+  .env file:  /home/you/project/.env
+
+  GITCOMMIT_AI_PROVIDER          openai                           [default]
+  GITCOMMIT_AI_MODEL             gpt-4o                           [.env]
+  ...
+API keys
+  openai    OPENAI_API_KEY = ********1234  [.env]
+  anthropic ANTHROPIC_API_KEY = not set
+```
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -141,8 +170,13 @@ Settings come from environment variables; command-line flags override them. See 
 | `GITCOMMIT_AI_TEMPERATURE` | `0.3` | Sampling temperature (0–2) |
 | `GITCOMMIT_AI_TIMEOUT` | `60` | Seconds per LLM request |
 | `GITCOMMIT_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama server |
+| `GITCOMMIT_AI_MAX_RETRIES` | `3` | Retries after a rate limit or transient error (0 disables) |
+| `GITCOMMIT_AI_RETRY_BASE_DELAY` | `1` | Seconds before the first retry; doubles each time |
+| `GITCOMMIT_AI_RETRY_MAX_DELAY` | `30` | Longest wait before a retry; a longer `retry-after` is not waited out |
 | `GITCOMMIT_AI_MAX_ITERATIONS` | `3` | Generate/critique rounds (1–10) |
 | `GITCOMMIT_AI_MAX_DIFF_CHARS` | `24000` | Diff characters sent to the model (min 1000) |
+| `GITCOMMIT_AI_ENV_FILE` | nearest `.env` | A specific env file, or empty to skip `.env` loading |
+| `GITCOMMIT_AI_HOOK` | | Set to `0` to skip the commit hook for one commit |
 
 ### Using it as `git ai-commit`
 
@@ -153,7 +187,7 @@ uv tool install ".[openai]"     # or: pipx install ".[openai]"
 git ai-commit --dry-run
 ```
 
-`git ai-commit` runs `generate` directly. Git intercepts `--help` for external commands and looks for a man page, so use `git ai-commit -h` (or `git-ai-commit --help`) for help.
+`git ai-commit` runs `generate` directly, and `git ai-commit config` and `git ai-commit hook ...` work too. Git intercepts `--help` for external commands and looks for a man page, so use `git ai-commit -h` (or `git-ai-commit --help`) for help.
 
 ---
 
@@ -272,6 +306,9 @@ uv run gitcommit-ai generate --provider anthropic --model claude-sonnet-5-5 --ve
 | `--dry-run` | Print the message and exit without committing |
 | `--yes`, `-y` | Commit without the confirmation prompt |
 | `--max-iterations` | Cap on generate/critique rounds (1–10) |
+| `--hint "text"` | What the change is for, in your own words (up to 1000 characters) |
+| `--amend` | Replace the last commit; the message covers it plus any staged changes |
+| `--no-verify` | Skip the pre-commit and commit-msg hooks when committing |
 | `--verbose`, `-v` | Show the detected convention, examples used, and critic rounds |
 | `--path`, `-p` | Repository path (default: current directory) |
 
@@ -300,8 +337,34 @@ feat(api): add orders endpoint
 - **Binary-only diffs**: the message is based on file names and stats, and you are told so.
 - **Large diffs**: each file's patch gets a share of a character budget; small patches stay whole, large ones are truncated at a line boundary, and files that do not fit are listed by name only. A notice tells you when this happened.
 - **No approved draft**: after `max_iterations` rounds the best draft is shown along with the issues the critic still has.
-- **Staleness guard**: if the staged changes differ from what the message was written for, nothing is committed (exit code 1).
-- **Hooks** run as usual when committing.
+- **Retries and provider errors**: rate limits and transient errors are retried with backoff and announced on stderr. If a provider still fails after the first draft exists (during the critic or a later round), the best draft so far is shown with a yellow "Stopped early" warning. A failure before any draft exists is an error.
+- **Bodies**: a short body, wrapped at 72 columns, is generated when at least half of the recent commits have one or the diff is large (6+ files or 200+ changed lines). Otherwise the message is a subject line only.
+- **`--hint`** steers the type and wording, but the message must still match the diff.
+- **`--amend`**: the message describes `HEAD` together with staged changes, and `HEAD` itself is not used as an example. If `HEAD` moved while generating, nothing is amended.
+- **Staleness guard**: if the staged changes (or `HEAD`) differ from what the message was written for, nothing is committed (exit code 1).
+- **Merge, cherry-pick, revert in progress**: refused, because Git already prepared the message; finish with `git commit`. A **rebase** in progress proceeds with a note. On a **detached `HEAD`** you are warned before committing.
+- **Hooks** run as usual when committing; `--no-verify` skips pre-commit and commit-msg.
+- **`--yes` commits whatever is shown**, including a best draft the critic did not fully approve; read the warning first.
+
+### 7. Show the Effective Settings
+```bash
+git-ai-commit config
+```
+Prints every setting with its source (flag, environment, `.env`, default), the `.env` file in use, and API keys masked to their last four characters.
+
+### 8. Propose Messages in `git commit` (Hook)
+Install a `prepare-commit-msg` hook so a plain `git commit` opens your editor with a proposal:
+
+```bash
+git-ai-commit hook install      # in the repository you want it for
+git commit                      # the editor opens with a proposed message
+git-ai-commit hook uninstall
+```
+
+- An existing `prepare-commit-msg` hook is **never overwritten**: it is moved to `prepare-commit-msg.pre-ai-commit` and still runs first, and `uninstall` puts it back. Installing twice just refreshes the script.
+- The hook does nothing for commits that already have a message (`-m`, `-F`, `--amend`, merges, squashes), when `GITCOMMIT_AI_HOOK=0` is set, or when `git-ai-commit` is not on your `PATH`.
+- It **never blocks a commit**: with no staged changes, a missing API key, or a provider failure it prints a note and your commit continues normally.
+- It respects `core.hooksPath` and linked worktrees.
 
 ---
 
@@ -334,7 +397,7 @@ graph TD
     Committer -->|"staged tree changed"| Refuse["refuse: StaleStagingError"]
 ```
 
-See [docs/architecture.md](docs/architecture.md) for the state schema, node contracts, critic rules, and design decisions.
+See [docs/architecture.md](https://github.com/vaibhav-barman/gitcommit-ai/blob/main/docs/architecture.md) for the state schema, node contracts, critic rules, and design decisions.
 
 ---
 
@@ -343,7 +406,7 @@ See [docs/architecture.md](docs/architecture.md) for the state schema, node cont
 GitCommit AI maintains strict quality standards: 100% type-annotated (`mypy` strict mode), linted and formatted with `ruff`, and verified against temporary Git repositories using `pytest`.
 
 ```bash
-# Run complete test suite (263 unit + integration tests, no network)
+# Run complete test suite (479 unit + integration tests, no network)
 uv run pytest -v
 
 # Run linter
@@ -356,7 +419,7 @@ uv run ruff format --check .
 uv run mypy src/ tests/
 ```
 
-Tests run in isolated temporary repositories generated by pytest fixtures and will never modify your working repository. LLM behavior is covered with `FakeLLM` and mocked SDK clients, so the suite needs no API keys or network access. Install every provider SDK (`uv sync --all-extras`) before running it, because the backend tests import them.
+Tests run in isolated temporary repositories generated by pytest fixtures and will never modify your working repository. LLM behavior is covered with `FakeLLM` and mocked SDK clients, so the suite needs no API keys or network access. Install every provider SDK (`uv sync --all-extras`) before running it, because the backend tests import them. CI runs the suite on Python 3.11, 3.12, and 3.13; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -370,6 +433,7 @@ gitcommit-ai/
 │       ├── core/
 │       │   ├── __init__.py
 │       │   ├── config.py             # Pydantic configuration model
+│       │   ├── settings.py           # flags > env > .env > defaults, with sources
 │       │   ├── exceptions.py         # Application exception hierarchy
 │       │   └── schemas.py            # Typed Pydantic models & StrEnums
 │       ├── git/
@@ -377,8 +441,9 @@ gitcommit-ai/
 │       │   ├── diff.py               # Staged & unstaged diff extraction
 │       │   ├── history.py            # Delimited historical commit parsing
 │       │   ├── repository.py         # Subprocess-safe repository inspector
-│       │   ├── snapshots.py          # Staged tree identity & staleness guard
-│       │   └── committer.py          # Staleness-guarded `git commit`
+│       │   ├── snapshots.py          # Staged tree + HEAD identity & staleness guard
+│       │   ├── committer.py          # Staleness-guarded `git commit` (--amend, --no-verify)
+│       │   └── hooks.py              # prepare-commit-msg hook installer
 │       ├── context/
 │       │   ├── __init__.py
 │       │   ├── normalizer.py         # Semantic commit normalization & parsing
@@ -391,6 +456,7 @@ gitcommit-ai/
 │       │   ├── base.py               # LLMProvider protocol & message types
 │       │   ├── factory.py            # create_provider(): config -> backend
 │       │   ├── fake.py               # Deterministic FakeLLM for tests
+│       │   ├── retry.py              # Bounded exponential backoff wrapper
 │       │   ├── openai_provider.py    # OpenAI backend
 │       │   ├── anthropic_provider.py # Anthropic backend
 │       │   ├── gemini_provider.py    # Gemini backend
@@ -403,6 +469,7 @@ gitcommit-ai/
 │       │   ├── diff_analyst.py       # Node: what does the diff do and why
 │       │   ├── context_retrieval.py  # Node: wraps the context engine
 │       │   ├── conventions.py        # Convention rules shared by generator & critic
+│       │   ├── message_format.py     # 72-column message layout
 │       │   ├── generator.py          # Node: convention-aware drafting
 │       │   ├── critic_rules.py       # Deterministic style/format rules
 │       │   ├── critic.py             # Node: rules, then LLM faithfulness check
@@ -410,12 +477,16 @@ gitcommit-ai/
 │       └── cli/
 │           ├── __init__.py
 │           ├── main.py               # Typer CLI application
-│           └── generate.py           # `generate` command & `git ai-commit` entry
+│           ├── generate.py           # `generate` command
+│           ├── config_cmd.py         # `config` command
+│           ├── hook.py               # `hook install|uninstall|run`
+│           └── git_subcommand.py     # `git ai-commit` entry point
 ├── tests/
 │   ├── conftest.py                   # Shared pytest fixtures
 │   ├── fixtures/
 │   │   ├── git_repo.py               # Isolated temp git repository factories
 │   │   ├── diffs.py                  # Synthetic DiffResult builders
+│   │   ├── cli.py                    # Drive the CLI with a fake LLM
 │   │   ├── agent_inputs.py           # Prepared AgentState builders
 │   │   └── scripted_llm.py           # FakeLLM that answers per agent role
 │   ├── unit/
@@ -433,6 +504,11 @@ gitcommit-ai/
 │       ├── test_cli_context.py       # CLI context & examples tests
 │       ├── test_cli_generate.py      # generate command, edge cases, git entry
 │       ├── test_committer.py         # Staleness-guarded commit tests
+│       ├── test_amend.py             # Amend across diff/history/snapshot/commit
+│       ├── test_hooks.py             # Hook installer & generated script
+│       ├── test_cli_hook.py          # hook commands
+│       ├── test_cli_settings.py      # .env precedence & config command
+│       ├── test_repository_state.py  # merge/rebase/cherry-pick/revert detection
 │       ├── test_graph.py             # Whole graph against temp repos
 │       ├── test_diff.py              # Diff extraction & rename tests
 │       ├── test_history.py           # Commit history extraction tests
@@ -440,8 +516,12 @@ gitcommit-ai/
 │       └── test_snapshots.py         # Snapshot comparison tests
 ├── docs/
 │   └── architecture.md               # Detailed architectural documentation
+├── .github/workflows/ci.yml          # Ruff, mypy + pytest (3.11–3.13), build smoke test
 ├── .env.example
 ├── .gitignore
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
 ├── pyproject.toml
 └── README.md
 ```
@@ -453,4 +533,5 @@ gitcommit-ai/
 - **Phase 1 (Completed)**: Project Foundation & Git Intelligence Layer.
 - **Phase 2 (Completed)**: Repository Context Engine & Historical Commit Intelligence.
 - **Phase 3 (Completed)**: LLM provider abstraction (OpenAI, Anthropic, Gemini, Ollama), LangGraph agent graph with a critic-driven reflection loop, the `generate` command, and the `git ai-commit` subcommand.
-- **Phase 4**: Interactive terminal UI for reviewing and editing the proposed message.
+- **Phase 4 (Completed)**: Hardening and release readiness: retries and graceful degradation, `.env` loading and `config`, `--hint` and message bodies, `--amend`/`--no-verify`, the commit hook, repository-state handling, CI, and packaging.
+- **Phase 5**: Interactive terminal UI for reviewing and editing the proposed message.

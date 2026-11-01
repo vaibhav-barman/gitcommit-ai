@@ -3,6 +3,8 @@ name = "gitcommit-ai"
 version = "0.1.0"
 description = "An agentic Git commit message generator powered by AI"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["git", "commit", "llm", "ai", "langgraph", "conventional-commits"]
 classifiers = [
     "Development Status :: 4 - Beta",

@@ -36,29 +36,35 @@ src/git_commit_ai/
 
 Contains data structures and runtime configuration shared across all layers:
 
-- **`schemas.py`**:
+- **`schemas.py`** (every field below is generated from the models, so it matches the code):
   - *Git Intelligence Schemas*:
-    - `RepositoryInfo`: Metadata describing repo root, active branch, detached HEAD state, empty status, and categorized file lists (staged, unstaged, untracked).
-    - `FileChange`: Granular change data for individual files (status, addition count, deletion count, binary flag, old path for renames/copies).
-    - `DiffStatistics`: Aggregate change metrics (`files_changed`, `total_additions`, `total_deletions`).
-    - `DiffResult`: Complete diff payload holding `raw_diff`, `file_changes`, `statistics`, and `mode`.
-    - `HistoricalCommit`: Clean historical commit record containing `hash`, `subject`, and multiline `body`.
-    - `RepositorySnapshot`: Immutable fingerprint containing `tree_hash`, `staged_files`, and timestamp for staleness checks.
-    - `FileStatus` & `DiffMode`: `StrEnum` definitions enforcing domain type safety.
+    - `RepositoryInfo`: Snapshot of repository-level metadata. Fields: `root_path`, `branch`, `is_detached_head`, `is_empty`, `operation`, `staged_files`, `unstaged_files`, `untracked_files`.
+    - `FileChange`: Per-file change information from a diff. Fields: `path`, `status`, `additions`, `deletions`, `is_binary`, `old_path`.
+    - `DiffStatistics`: Aggregate statistics for a diff. Fields: `files_changed`, `total_additions`, `total_deletions`.
+    - `DiffResult`: Complete diff output including raw diff, per-file changes, and statistics. Fields: `raw_diff`, `file_changes`, `statistics`, `mode`.
+    - `HistoricalCommit`: Metadata for a single historical commit. Fields: `hash`, `subject`, `body`.
+    - `RepositorySnapshot`: Snapshot of the staged tree identity for staleness detection. Fields: `tree_hash`, `head_hash`, `staged_files`, `timestamp`.
+    - `FileStatus`: `StrEnum`. Status of a file in the Git working tree or index. Members: `ADDED`, `MODIFIED`, `DELETED`, `RENAMED`, `COPIED`, `UNTRACKED`, `TYPE_CHANGED`.
+    - `DiffMode`: `StrEnum`. Which changes to diff. Members: `STAGED`, `UNSTAGED`, `AMEND`.
+    - `RepositoryOperation`: `StrEnum`. A multi-step Git operation that is paused and waiting for a commit. Members: `NONE`, `MERGE`, `REBASE`, `CHERRY_PICK`, `REVERT`.
   - *Context Engine Schemas*:
-    - `CommitConvention`: `StrEnum` covering `CONVENTIONAL`, `SCOPED_CONVENTIONAL`, `GITMOJI`, `BRACKET_PREFIX`, `PLAIN`, and `UNKNOWN`.
-    - `NormalizedCommit`: Decomposed commit message containing `hash`, `raw_subject`, `raw_body`, `type`, `scope`, `is_breaking`, `normalized_subject`, `normalized_body`, and `footers`.
-    - `ConventionDetectionResult`: Statistical detection outcome containing `detected_convention`, `confidence`, `distribution`, `analyzed_commits`, and `supporting_evidence`.
-    - `CommitTypeStatistics`: Counts of distinct commit types, most common type, and total count.
-    - `CommitStyleProfile`: Granular writing style metrics including `average_subject_length`, `median_subject_length`, `typical_capitalization`, `punctuation_patterns`, `body_usage_frequency`, `scope_usage_frequency`, `common_scopes`, `type_frequencies`, `imperative_mood_frequency`, and `recent_convention_shifts`.
-    - `HistoricalExample`: Contextual commit record containing `hash`, `subject`, `body`, `relevance_score`, `selection_reasons`, and `matched_files`.
-    - `ExampleRetrievalResult`: Retrieval outcome containing `examples`, `query_files`, and `candidate_pool_size`.
-    - `RepositoryContext`: Complete contextual envelope combining `convention_result`, `style_profile`, `historical_examples`, and `metadata`.
+    - `CommitConvention`: `StrEnum`. Categorization of commit message convention. Members: `CONVENTIONAL`, `SCOPED_CONVENTIONAL`, `GITMOJI`, `BRACKET_PREFIX`, `PLAIN`, `UNKNOWN`.
+    - `NormalizedCommit`: Normalized metadata extracted from a historical commit. Fields: `hash`, `original_subject`, `original_body`, `cleaned_subject`, `cleaned_body`, `convention`, `commit_type`, `scope`, `is_breaking`, `breaking_description`, `gitmoji`, `bracket_prefix`.
+    - `ConventionDetectionResult`: Statistical summary of repository-level commit convention analysis. Fields: `detected_convention`, `confidence`, `supporting_evidence`, `analyzed_commits`, `format_distribution`.
+    - `CommitTypeStatistics`: Frequency metrics for a specific commit type. Fields: `type_name`, `count`, `percentage`, `breaking_count`.
+    - `CommitStyleProfile`: Structured stylistic profile of repository commit habits. Fields: `dominant_convention`, `type_frequencies`, `scope_usage_frequency`, `common_scopes`, `average_subject_length`, `median_subject_length`, `typical_capitalization`, `punctuation_patterns`, `imperative_mood_frequency`, `body_usage_frequency`, `breaking_change_frequency`, `recent_convention_shifts`.
+    - `HistoricalExample`: Selected historical commit recommended as few-shot context. Fields: `hash`, `subject`, `body`, `original_message`, `relevance_score`, `selection_reasons`, `matched_scope`, `matched_type`.
+    - `ExampleRetrievalResult`: Result of historical example selection. Fields: `examples`, `total_candidates`, `selection_metadata`.
+    - `RepositoryContext`: Aggregated repository context bundle for consumption by AI generators. Fields: `style_profile`, `convention_result`, `historical_examples`, `analyzed_commit_count`, `retrieval_metadata`.
 - **`config.py`**:
-  - `GitCommitAIConfig`: Pydantic settings model validating command timeouts, default history counts, diff limits, and diff modes, plus LLM provider, model, temperature, timeout, Ollama URL, `max_iterations` (1–10), and the prompt diff budget (`max_prompt_diff_chars`).
-  - `GitCommitAIConfig.from_env()`: builds the configuration from `GITCOMMIT_AI_*` variables and reports the offending variable name on invalid values (`ConfigurationError`).
+  - `GitCommitAIConfig`: Pydantic settings model. Fields: `history_commit_count`, `git_timeout_seconds`, `default_diff_mode`, `max_diff_size_bytes`, `llm_provider`, `llm_model`, `llm_temperature`, `llm_timeout_seconds`, `llm_max_retries`, `llm_retry_base_delay_seconds`, `llm_retry_max_delay_seconds`, `ollama_base_url`, `max_iterations` (1–10), `max_prompt_diff_chars`. The retry base delay may not exceed the max delay.
+  - `GitCommitAIConfig.from_env()` and `ENV_FIELDS`: map `GITCOMMIT_AI_*` variables to fields; an invalid value raises `ConfigurationError` naming the variable.
   - `ProviderName`: `StrEnum` of the supported backends.
   - API keys are deliberately **not** part of the configuration; they are read from the environment when a provider is created, so they never appear in reprs or logs.
+- **`settings.py`**:
+  - `load_settings(env, start_dir)` layers **flags > process environment > `.env` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, default).
+  - The `.env` file is the nearest one found walking up from the current directory, parsed with `python-dotenv` into a dict. It is **never** written into `os.environ`, so its values cannot leak into child processes. `GITCOMMIT_AI_ENV_FILE` names a specific file, or disables loading when empty. Blank values count as unset at every layer.
+  - `Settings.with_flags()` applies command-line flags on top (a flag left unset does not override anything); `mask_secret()` keeps only the last four characters of a secret.
 - **`exceptions.py`**:
   - Hierarchical domain exceptions rooted at `GitCommitAIError`:
     - `GitNotFoundError`: Git executable is not on `PATH`.
@@ -69,7 +75,8 @@ Contains data structures and runtime configuration shared across all layers:
     - `StaleStagingError`: The staged tree changed between analysis and commit.
     - `ConfigurationError`: An environment variable or setting is invalid.
     - `AgentStateError`: A graph node ran before its upstream data existed.
-    - `LLMError` and subclasses: `MissingAPIKeyError`, `ProviderNotInstalledError`, `OllamaUnreachableError`, `RateLimitError` (carries `retry_after` when the server sent one), `LLMResponseError`.
+    - `HookError`: The prepare-commit-msg hook cannot be installed or removed safely.
+    - `LLMError` and subclasses: `MissingAPIKeyError`, `ProviderNotInstalledError`, `OllamaUnreachableError`, `RateLimitError` (carries `retry_after` when the server sent one), `TransientLLMError` (timeouts, dropped connections, 5xx; retried), `LLMResponseError`.
 
 ### B. Git Intelligence Module (`git_commit_ai.git`)
 
@@ -82,21 +89,26 @@ Implements all Git interactions using Python's `subprocess` standard library:
   - Tracks unstaged modifications (`git diff --name-only`).
   - Tracks untracked files (`git ls-files --others --exclude-standard`).
   - Handles repositories with zero commits.
+  - Detects a paused merge, rebase, cherry-pick or revert (`get_operation_in_progress()`, reported as `RepositoryInfo.operation`) from Git's own marker files via `--git-path`, so linked worktrees work.
+  - Asks Git for the empty-tree hash (`git hash-object -t tree /dev/null`, nothing is written) instead of hard-coding it, which also covers SHA-256 repositories.
 - **`diff.py` (`DiffExtractor`)**:
-  - Focuses by default strictly on **staged** changes (`DiffMode.STAGED`).
+  - Focuses by default strictly on **staged** changes (`DiffMode.STAGED`). `DiffMode.AMEND` diffs the index against `HEAD`'s parent (the empty tree for a root commit): what `git commit --amend` would produce.
   - Captures raw unified diff with rename detection enabled (`-M`, `--no-color`).
   - Correlates addition/deletion counts from `git diff --numstat` with file statuses from `git diff --name-status`.
   - Resolves Git rename syntax (`old => new` and `{old => new}`) to identify original and destination paths.
   - Flags binary files without attempting lossy UTF-8 decoding.
 - **`history.py` (`CommitHistoryExtractor`)**:
-  - Extracts recent non-merge commits (`git log -n <count> --no-merges`).
+  - Extracts recent non-merge commits (`git log -n <count> --no-merges`). `exclude_head=True` starts at `HEAD^`, so a commit being amended is not offered as an example of itself.
   - Employs unique delimiters (`---GCAI_COMMIT_DELIM---` and `---GCAI_FIELD_DELIM---`) inside `--format` to parse multiline commit bodies and special characters reliably.
 - **`snapshots.py` (`SnapshotManager`)**:
-  - Computes the staged tree hash via `git write-tree` without creating a commit object.
-  - Compares snapshots (`compare()`, `has_changed_since()`) to detect staged modifications occurring during execution.
+  - Computes the staged tree hash via `git write-tree` without creating a commit object, and records the `HEAD` commit.
+  - Compares snapshots (`compare()`, `has_changed_since()`) to detect staged modifications, or a moved `HEAD`, occurring during execution. The same staged tree under a new `HEAD` is a different change.
 - **`committer.py` (`GitCommitter`)**:
-  - The only component that writes to the repository. `commit(message, expected_snapshot)` raises `StaleStagingError` if the staged tree no longer matches the snapshot taken before generation; otherwise it runs `git commit -m` (hooks run as usual) and returns the short hash.
+  - Writes to the repository only by committing. `commit(message, expected_snapshot, amend=False, no_verify=False)` raises `StaleStagingError` if the staged tree or `HEAD` no longer matches the snapshot taken before generation; otherwise it runs `git commit -m` (with `--amend` and/or `--no-verify` when asked; hooks run otherwise) and returns the short hash.
   - It never stages or unstages anything. A very small window remains between the staleness check and the commit itself; closing it fully would need a lock Git does not offer for the index.
+- **`hooks.py` (`HookInstaller`)**:
+  - Installs and removes the `prepare-commit-msg` hook in the directory Git reports (`--git-path hooks`, so `core.hooksPath` and worktrees are respected).
+  - Never overwrites a hook it did not write: the existing one is moved to `prepare-commit-msg.pre-ai-commit` (numbered if taken, so an earlier backup is never replaced) and the new script runs it first, preserving its behaviour and any veto. `uninstall()` removes only a hook carrying its marker and restores the backup; installing twice just refreshes the script.
 
 ### C. Repository Context Engine (`git_commit_ai.context`)
 
@@ -144,15 +156,18 @@ Builds the user-facing command-line tool using [Typer](https://typer.tiangolo.co
 - `history`: Displays recent commit hashes and subjects with configurable `--count`.
 - `context`: Analyzes and displays detected commit convention, confidence, style profile metrics, common types, common scopes, and evidence.
 - `examples`: Retrieves and displays top historical commit examples matching staged or unstaged changes, complete with relevance scores, summaries, and selection reasons.
-- `generate`: runs the agent graph on the staged diff (see §5), prints the message to stdout, and commits after confirmation. Flags: `--provider`, `--model`, `--dry-run`, `--yes`, `--max-iterations`, `--verbose`, `--path`. Diagnostics go to stderr.
-- `git-ai-commit` console script: runs `generate` directly so `git ai-commit` works (git finds `git-<name>` executables on `PATH`). It also accepts `-h`, because git intercepts `--help` for external commands.
+- `generate`: runs the agent graph on the staged diff (see §5), prints the message to stdout, and commits after confirmation. Flags: `--provider`, `--model`, `--dry-run`, `--yes`, `--max-iterations`, `--hint`, `--amend`, `--no-verify`, `--verbose`, `--path`. Diagnostics go to stderr. A merge, cherry-pick or revert in progress is refused (Git has already prepared the message), a rebase proceeds with a note, and a detached `HEAD` gets a warning before committing.
+- `config`: shows each effective setting with its source and the `.env` file in use; API keys are masked to their last four characters.
+- `hook install` / `hook uninstall`: manage the `prepare-commit-msg` hook. A hidden `hook run` is what the hook calls; it writes a proposal into the message file above Git's comments and **never blocks a commit**: no staged changes, a pending merge, a user template, a missing key, a provider failure or any unexpected error only print a note.
+- `git-ai-commit` console script: a command group whose callback is `generate`, so a bare `git ai-commit --dry-run` works (git finds `git-<name>` executables on `PATH`) while `config` and `hook` remain reachable. It also accepts `-h`, because git intercepts `--help` for external commands.
 - Error handling maps all `GitCommitAIError` exceptions to clean terminal stderr messages and exit code 1.
 
 ### E. LLM Module (`git_commit_ai.llm`)
 
 - **`base.py`**: `LLMMessage`/`Role` and the `LLMProvider` protocol: `name`, `model`, and `complete(messages) -> str`. The protocol is deliberately text-in/text-out; structured replies are layered on top by `agents.llm_json`.
-- **`factory.py`**: `create_provider(config, env)` picks the backend, resolves the model (explicit or provider default), and reads the API key from the environment. Backend modules are imported lazily, so a missing optional SDK only affects the provider that needs it (`ProviderNotInstalledError` names the extra to install).
-- **Backends** (`openai_provider.py`, `anthropic_provider.py`, `gemini_provider.py`, `ollama_provider.py`): thin wrappers over the official SDKs. Each translates SDK failures into typed errors and rejects empty completions. Anthropic and Gemini receive the system prompt out of band.
+- **`factory.py`**: `create_provider(config, env)` picks the backend, resolves the model (explicit or provider default), and reads the API key from the environment, and wraps the backend in a `RetryingProvider`. Backend modules are imported lazily, so a missing optional SDK only affects the provider that needs it (`ProviderNotInstalledError` names the extra to install).
+- **Backends** (`openai_provider.py`, `anthropic_provider.py`, `gemini_provider.py`, `ollama_provider.py`): thin wrappers over the official SDKs. Each translates SDK failures into typed errors (rate limit, transient for timeouts/connection drops/5xx, unreachable Ollama) and rejects empty completions. Anthropic and Gemini receive the system prompt out of band.
+- **`retry.py`**: `RetryingProvider` retries only `RateLimitError` and `TransientLLMError` with exponential backoff (`RetryPolicy`: max retries, base delay, max delay). A server's `retry-after` is honoured when it fits within the max delay; a longer one is not waited out, so the bound is hard. Bad keys, empty replies and an unreachable Ollama fail immediately. Each retry is reported through an optional callback (the CLI prints it).
 - **`fake.py`**: `FakeLLM` replays a scripted sequence or a handler callable and records calls. An exhausted sequence raises rather than reusing a reply, so tests cannot silently pass on stale data.
 
 ### F. Agents Module (`git_commit_ai.agents`)
@@ -168,8 +183,9 @@ To guarantee absolute safety, all Git interactions adhere to the following rules
 1. **No Shell Invocations**: `shell=True` is strictly forbidden. Commands are passed exclusively as lists of arguments (`["git", "-C", repo_path, "diff", ...]`).
 2. **Deterministic Timeouts**: Every subprocess execution enforces a timeout (default 30 seconds via `GitCommitAIConfig.git_timeout_seconds`), preventing hung processes from indefinitely blocking execution.
 3. **Stream Capture**: `stdout` and `stderr` are captured and decoupled. On failure, `stderr` is wrapped inside `GitCommandError` for debugging.
-4. **No Destructive Operations**: The application never invokes `git add`, `git reset`, `git checkout`, `git rm`, or `git clean`. Everything is read-only with respect to repository files and the Git index except one operation: `GitCommitter` runs `git commit` on what is already staged, after a staleness check, and only when the user confirmed (or passed `--yes`).
-5. **Safe Diff Fallbacks**: In newly initialized repositories (no commits yet), diffing the index compares cleanly against the unborn state without crashing.
+4. **No Destructive Operations**: The application never invokes `git add`, `git reset`, `git checkout`, `git rm`, or `git clean`. Everything is read-only with respect to repository files and the Git index except one operation: `GitCommitter` runs `git commit` on what is already staged, after a staleness check, and only when the user confirmed (or passed `--yes`). `--amend` and `--no-verify` are passed through to that one command.
+5. **Hook Installation Never Destroys**: `HookInstaller` is the only code that writes inside the hooks directory. It backs up a foreign hook before replacing it, chains to it, and refuses to remove a hook it did not write.
+6. **Safe Diff Fallbacks**: In newly initialized repositories (no commits yet), diffing the index compares cleanly against the unborn state without crashing.
 
 ---
 
@@ -226,7 +242,7 @@ The agent graph that consumes these results is described in §5.
 
 ---
 
-## 5. AI Orchestration (Phase 3)
+## 5. AI Orchestration
 
 LLM calls happen only inside `git_commit_ai.agents`. Everything the agents consume (`DiffResult`, `RepositoryContext`) comes from the deterministic layers, and the CLI does all Git access, so the graph itself never touches Git.
 
@@ -235,11 +251,13 @@ graph TD
     Start(["START"]) --> Analyst["diff_analyst"]
     Analyst --> Retrieval["context_retrieval"]
     Retrieval --> Generator["generator"]
-    Generator --> Critic["critic"]
+    Generator --> GenRoute{"route_after_generator"}
+    GenRoute -->|"ok"| Critic["critic"]
+    GenRoute -->|"provider error after the first draft"| Done(["END"])
     Critic --> Route{"route_after_critic"}
     Route -->|"rejected, rounds left"| Generator
-    Route -->|"approved"| Done(["END"])
-    Route -->|"cap reached"| Done
+    Route -->|"approved"| Done
+    Route -->|"cap reached or interrupted"| Done
     Done --> Pick["select_best_draft"]
 ```
 
@@ -249,12 +267,13 @@ graph TD
 
 | Field | Written by | Meaning |
 |---|---|---|
-| `diff_result`, `history` | caller | Staged diff and extracted commits (inputs) |
+| `diff_result`, `history`, `hint` | caller | Staged (or amend) diff, extracted commits, and the author's optional statement of intent (inputs) |
 | `diff_digest` | diff_analyst | Prompt-sized diff text, with `was_truncated` and `omitted_files` |
 | `analysis` | diff_analyst | `DiffAnalysis`: change type, summary, intent, breaking flag, scope hint |
 | `context` | context_retrieval | `RepositoryContext` from the context engine |
 | `drafts` | generator, critic | `Draft`s: message, iteration, and the critic's `Critique` |
 | `iteration` | generator | Completed generation rounds |
+| `interruption` | generator, critic | Provider failure that cut the run short; the best draft so far is used |
 
 A `Critique` is a list of `Violation(rule, message, severity)`. A draft is **approved** when it has no error-level violations; warnings are advisory. `penalty` weights errors 10 and warnings 1 and is used to rank drafts.
 
@@ -262,10 +281,10 @@ A `Critique` is a list of `Violation(rule, message, severity)`. A draft is **app
 
 | Node | LLM? | Reads | Writes |
 |---|---|---|---|
-| `diff_analyst` | yes | `diff_result` | `diff_digest`, `analysis` |
+| `diff_analyst` | yes | `diff_result`, `hint` | `diff_digest`, `analysis` |
 | `context_retrieval` | no | `diff_result`, `history` | `context` |
-| `generator` | yes | digest, analysis, context, previous draft + critique | appends a `Draft`, increments `iteration` |
-| `critic` | only if no rule error | digest, analysis, context, latest draft | replaces the latest draft with a reviewed copy |
+| `generator` | yes | digest, analysis, context, hint, previous draft + critique | appends a `Draft`, increments `iteration` (or sets `interruption`) |
+| `critic` | only if no rule error | digest, analysis, context, diff, latest draft | replaces the latest draft with a reviewed copy (and may set `interruption`) |
 
 Nodes are built by factories (`make_generator(llm)`, ...) and typed with the `AgentNode` protocol, so each can be unit-tested with a `FakeLLM` and no graph. A node that runs before its inputs exist raises `AgentStateError`.
 
@@ -278,7 +297,9 @@ Large diffs are never sent whole. The file summary (status, path, rename origin,
 The prompt is built from deterministic context, not a fixed template:
 
 - **Format rule** from the detected convention (conventional, scoped, gitmoji, bracket prefix, plain). With no usable history (`UNKNOWN`) the default is Conventional Commits (`agents/conventions.py`, shared with the critic so both agree).
-- **Style rules** from the profile: capitalization, trailing period, subject length (hard limit 72), imperative mood, body habit, and the breaking-change footer when the analyst flags a break.
+- **Style rules** from the profile: capitalization, trailing period, subject length (hard limit 72), imperative mood, and the breaking-change footer when the analyst flags a break.
+- **Body rule** from `body_expected()` (see *Message bodies and layout*): a short body, or a subject line only.
+- **Author hint**: when `--hint` is given, it is quoted as the author's statement of intent. It steers the type and wording; the prompt still says to describe only what the diff shows.
 - **Few-shot examples**: the retrieved historical commits, verbatim.
 - **Revision context**: on later rounds, the previous draft and the critic's violations.
 
@@ -296,14 +317,54 @@ Deterministic rules decide everything a rule can decide:
 | `trailing-period` | error | Matches the repo's punctuation habit |
 | `breaking-change` | error / warning | Breaking change unmarked (error); marked but not breaking (warning) |
 | `type-mismatch` | warning | Draft type differs from the analyst's |
-| `body` | warning | Body presence against the repo's habit |
-| `blank-line` | warning | Blank line between subject and body |
+| `body-missing` | error | A body is expected (see below) but absent |
+| `body-wrap` | error | A body line over 72 columns (code blocks and single unbreakable tokens such as URLs are exempt) |
+| `blank-line` | error | No blank line between subject and body (Git would fold the body into the subject) |
+| `body-unexpected` | warning | A body where only a subject is expected; a breaking-change footer is exempt |
+| `body-length` | warning | More than 12 non-blank body lines |
 
-Only when no rule raised an error does the critic spend one LLM call on **faithfulness** (does the message claim changes that are not in the diff, or miss the main one?). A draft that must be rewritten anyway does not need that verdict yet. If the verdict cannot be parsed after one corrective retry, a non-blocking `faithfulness-unchecked` warning is recorded instead of failing the run.
+Only when no rule raised an error does the critic spend one LLM call on **faithfulness** (does the message claim changes that are not in the diff, or miss the main one?). A draft that must be rewritten anyway does not need that verdict yet. If that call fails for any reason (rate limit, timeout, empty or malformed reply), the draft keeps its rule-based verdict plus a non-blocking `faithfulness-unchecked` warning, and the failure is recorded as an interruption instead of failing the run.
 
 ### Reflection loop and termination (`agents/graph.py`)
 
-`route_after_critic` is a pure function: stop when the latest draft is approved, and unconditionally when `iteration >= max_iterations`; otherwise regenerate. The LangGraph recursion limit is derived from the same cap, so the framework guard can never fire before the configured one. When no draft is approved, `select_best_draft` returns the draft with the lowest penalty, preferring the latest on ties (it has seen the most feedback); an unreviewed draft ranks below any reviewed one. The result carries `approved=False`, and the CLI shows the remaining issues.
+`route_after_critic` is a pure function: stop when a provider error interrupted the run or the latest draft is approved, and unconditionally when `iteration >= max_iterations`; otherwise regenerate. `route_after_generator` skips the critic when the generator was interrupted. The LangGraph recursion limit is derived from the same cap, so the framework guard can never fire before the configured one. When no draft is approved, `select_best_draft` returns the draft with the lowest penalty, preferring the latest on ties (it has seen the most feedback); an unreviewed draft ranks below any reviewed one. The result carries `approved=False` (also when the review was cut short), and the CLI shows the interruption and any remaining issues.
+
+### Retry and degradation
+
+Two layers keep a transient provider problem from costing the user a message:
+
+1. **Retry** (`llm/retry.py`): rate limits and transient errors (timeouts, dropped connections, 5xx) are retried with bounded exponential backoff. Every LLM call goes through it, including the first generation.
+2. **Degradation**: if a call still fails after its retries, what happens depends on whether a draft exists.
+
+| Where it fails | Result |
+|---|---|
+| Diff analyst, or the first generation | The run aborts with the error: there is nothing to show yet |
+| Critic's faithfulness check | The draft is kept with a `faithfulness-unchecked` warning; `interruption` is set |
+| Any generation round after the first | The best draft so far is returned; `interruption` is set |
+
+An interrupted result always has `approved=False`, and the CLI prints "Stopped early: ... Showing the best draft so far." in yellow.
+
+### Message bodies and layout (`agents/conventions.py`, `agents/message_format.py`)
+
+`body_expected(context, diff)` decides whether a body is wanted, and generator and critic both use it: **yes** when at least half of the recent commits have a body, or when the diff is large (6 or more files, or 200 or more changed lines); **no** otherwise, and the message is a subject line only.
+
+Models are unreliable at hard-wrapping, so the generator lays the message out itself with `format_message()`: a blank line after the subject, paragraphs reflowed at 72 columns, list items with a hanging indent, trailers (`Co-authored-by:`, `BREAKING CHANGE:`, `Refs #12`) kept one per line, indented code blocks and unbreakable tokens left alone. The function is idempotent. The critic's body rules are the backstop.
+
+### Amend
+
+`--amend` replaces the last commit, so the message must describe what the commit would then contain. `DiffMode.AMEND` diffs the index against `HEAD`'s parent (the empty tree for a root commit), which makes a bare `--amend` with nothing staged a reword of `HEAD`. History for examples starts at `HEAD^`, so the commit being replaced is never an example of itself. Snapshots record the `HEAD` hash, so an amend is refused if `HEAD` moved while the message was generated: without that, it could silently rewrite a different commit.
+
+### Repository states
+
+| State | `generate` | Hook |
+|---|---|---|
+| Merge, cherry-pick or revert in progress | Refused with an explanation: Git already prepared the message | Skipped |
+| Rebase in progress | Proceeds, with a note | Skipped |
+| Detached `HEAD` | Proceeds; warns before committing that the commit belongs to no branch | Unaffected |
+
+### The prepare-commit-msg hook
+
+The installed script exits at once for sources that already carry a message (`message` for `-m`/`-F`, `merge`, `squash`, `commit` for `--amend`/`-c`/`-C`), when `GITCOMMIT_AI_HOOK=0`, or when `git-ai-commit` is not on `PATH`. Otherwise it runs `git-ai-commit hook run`, which writes the proposal above Git's comment lines. A message already provided by a template is left alone. `--no-verify` does not skip this hook (Git only skips pre-commit and commit-msg), which is why the `GITCOMMIT_AI_HOOK=0` switch exists.
 
 ### Structured replies (`agents/llm_json.py`)
 
@@ -317,15 +378,15 @@ sequenceDiagram
     participant Snap as SnapshotManager
     participant Graph as Agent graph
     participant Commit as GitCommitter
-    CLI->>Snap: capture() before generation
+    CLI->>Snap: capture() staged tree and HEAD, before generation
     CLI->>Graph: run(diff, history)
     Graph-->>CLI: message
     CLI->>CLI: confirm (unless --yes)
     CLI->>Commit: commit(message, snapshot)
     Commit->>Snap: has_changed_since(snapshot)
-    alt staged tree unchanged
-        Commit->>Commit: git commit -m
-    else changed
+    alt staged tree and HEAD unchanged
+        Commit->>Commit: git commit -m (--amend / --no-verify if asked)
+    else either changed
         Commit-->>CLI: StaleStagingError (nothing committed)
     end
 ```
@@ -334,9 +395,11 @@ sequenceDiagram
 
 - **Rules before the LLM**: anything checkable deterministically is, which makes critic behavior reproducible and cheap, and keeps the LLM for the one question rules cannot answer.
 - **One shared definition of "correct"**: generator and critic both use `effective_convention`, and the imperative verb list is a single public constant of the style analyzer.
-- **Graceful degradation over failure**: an unparsable faithfulness verdict becomes a warning, and an exhausted iteration budget returns the best draft. Provider failures (missing key, rate limit, unreachable Ollama) do propagate, because retrying cannot fix them.
-- **Optional SDKs**: only `langgraph` is a core dependency; provider SDKs are extras imported lazily.
-- **`.env` is not loaded**: avoids another dependency and implicit behavior; `.env.example` documents the variables to export.
+- **Graceful degradation over failure**: an unparsable or failed faithfulness check becomes a warning, a provider error after the first draft returns the best draft so far, and an exhausted iteration budget does the same. Retry covers transient errors first. Errors that retrying cannot fix (missing key, unreachable Ollama) fail immediately, and a failure before any draft exists aborts.
+- **Optional SDKs**: only `langgraph` is a core dependency of the agents; provider SDKs are extras imported lazily.
+- **`.env` is parsed, never exported**: `python-dotenv` reads the file into a dict that is overlaid under the real environment, so it cannot leak into child processes or override what the user set deliberately.
+- **A hook must never be the reason a commit fails**: `hook run` swallows every error, and the script itself exits 0 when the tool is missing.
+- **Layout is mechanical, judgement is not**: wrapping and the blank line are applied by code; whether a body is wanted is a deterministic rule shared by generator and critic.
 
 ---
 
@@ -360,6 +423,13 @@ sequenceDiagram
 | Prompt Engineering & Few-Shot | **Implemented** | Convention- and profile-driven prompts with retrieved examples and critic feedback |
 | LangGraph State Graph | **Implemented** | Analyst, retrieval, generator, critic nodes; capped reflection loop with best-draft fallback |
 | Diff Budgeting | **Implemented** | Water-filled per-file truncation; binary files summarised without patches |
-| CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`; `git ai-commit` entry point |
-| Unit & Integration Tests | **Implemented** | 263 tests using isolated temporary Git repositories and `FakeLLM`; no network |
-| Interactive TUI | *Planned (Phase 4)* | Interactive review and editing of the proposed message |
+| CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`, `config`, `hook`; `git ai-commit` entry point |
+| Unit & Integration Tests | **Implemented** | 479 tests using isolated temporary Git repositories and `FakeLLM`; no network |
+| Retry & Degradation | **Implemented** | Bounded exponential backoff; best-draft fallback on late provider errors |
+| Layered Settings | **Implemented** | flags > environment > `.env` > defaults; `config` command with masked secrets |
+| Hint & Bodies | **Implemented** | `--hint`; deterministic body rule; 72-column layout; body critic rules |
+| Amend / No-verify | **Implemented** | `DiffMode.AMEND`, HEAD-aware staleness guard, passthrough flags |
+| Hook Installer | **Implemented** | Backs up and chains foreign hooks; never blocks a commit |
+| Repository States | **Implemented** | Merge/cherry-pick/revert refused, rebase noted, detached HEAD warned |
+| CI & Packaging | **Implemented** | GitHub Actions (Ruff, mypy, pytest on 3.11–3.13, build smoke test); `py.typed` |
+| Interactive TUI | *Planned* | Interactive review and editing of the proposed message |
