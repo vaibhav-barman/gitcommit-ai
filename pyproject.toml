@@ -8,12 +8,30 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "langgraph>=0.6,<2.0",
     "pydantic>=2.0,<3.0",
     "typer>=0.15.0,<1.0",
 ]
 
 [project.scripts]
 gitcommit-ai = "git_commit_ai.cli.main:app"
+
+[project.optional-dependencies]
+openai = [
+    "openai>=1.50,<3.0",
+]
+anthropic = [
+    "anthropic>=0.40,<1.0",
+]
+gemini = [
+    "google-genai>=1.0,<2.0",
+]
+ollama = [
+    "ollama>=0.4,<1.0",
+]
+all = [
+    "gitcommit-ai[openai,anthropic,gemini,ollama]",
+]
 
 [dependency-groups]
 dev = [
