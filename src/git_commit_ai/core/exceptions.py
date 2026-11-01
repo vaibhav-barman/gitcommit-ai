@@ -46,3 +46,59 @@ class EmptyRepositoryError(GitCommitAIError):
 
     def __init__(self, message: str = "Repository has no commits") -> None:
         super().__init__(message)
+
+
+class ConfigurationError(GitCommitAIError):
+    """Raised when configuration values or environment variables are invalid."""
+
+
+class LLMError(GitCommitAIError):
+    """Base exception for failures originating from an LLM provider."""
+
+
+class MissingAPIKeyError(LLMError):
+    """Raised when a provider requires an API key that is not set."""
+
+    def __init__(self, provider: str, env_var: str) -> None:
+        super().__init__(
+            f"No API key for provider '{provider}'. Set the {env_var} environment variable."
+        )
+        self.provider = provider
+        self.env_var = env_var
+
+
+class ProviderNotInstalledError(LLMError):
+    """Raised when the SDK for a selected provider is not installed."""
+
+    def __init__(self, provider: str, extra: str) -> None:
+        super().__init__(
+            f"The '{provider}' provider needs its SDK. "
+            f"Install it with: pip install 'gitcommit-ai[{extra}]'"
+        )
+        self.provider = provider
+        self.extra = extra
+
+
+class OllamaUnreachableError(LLMError):
+    """Raised when the Ollama server cannot be reached."""
+
+    def __init__(self, base_url: str) -> None:
+        super().__init__(
+            f"Could not reach Ollama at {base_url}. Start it with 'ollama serve' "
+            "or set GITCOMMIT_AI_OLLAMA_URL."
+        )
+        self.base_url = base_url
+
+
+class RateLimitError(LLMError):
+    """Raised when a provider rejects a request because of rate limiting."""
+
+    def __init__(self, provider: str, retry_after: float | None = None) -> None:
+        hint = f" Retry in about {retry_after:.0f}s." if retry_after is not None else ""
+        super().__init__(f"Provider '{provider}' rate limit exceeded.{hint}")
+        self.provider = provider
+        self.retry_after = retry_after
+
+
+class LLMResponseError(LLMError):
+    """Raised when a provider returns an empty, malformed, or unusable response."""
