@@ -11,9 +11,7 @@ from git_commit_ai.core.schemas import CommitConvention
 from git_commit_ai.llm.base import LLMMessage, Role
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from git_commit_ai.agents.state import DiffAnalysis, DiffDigest
+    from git_commit_ai.agents.state import AgentNode, DiffAnalysis, DiffDigest
     from git_commit_ai.core.schemas import CommitStyleProfile, RepositoryContext
     from git_commit_ai.llm.base import LLMProvider
 
@@ -28,7 +26,7 @@ _TYPED = {CommitConvention.CONVENTIONAL, CommitConvention.SCOPED_CONVENTIONAL}
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 
 
-def make_generator(llm: LLMProvider) -> Callable[[AgentState], dict[str, object]]:
+def make_generator(llm: LLMProvider) -> AgentNode:
     """Create the generator node.
 
     Each call appends one ``Draft`` and advances the iteration counter. When

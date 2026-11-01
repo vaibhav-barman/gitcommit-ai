@@ -7,14 +7,12 @@ from typing import TYPE_CHECKING
 from git_commit_ai.context.engine import RepositoryContextEngine
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from git_commit_ai.agents.state import AgentState
+    from git_commit_ai.agents.state import AgentNode, AgentState
 
 
 def make_context_retrieval(
     engine: RepositoryContextEngine | None = None,
-) -> Callable[[AgentState], dict[str, object]]:
+) -> AgentNode:
     """Create the context retrieval node.
 
     The node makes no LLM call. It delegates to ``RepositoryContextEngine``

@@ -10,8 +10,7 @@ from git_commit_ai.agents.state import AgentState, CommitType, DiffAnalysis
 from git_commit_ai.llm.base import LLMMessage, Role
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
+    from git_commit_ai.agents.state import AgentNode
     from git_commit_ai.llm.base import LLMProvider
 
 _SYSTEM_PROMPT = f"""You analyze staged git diffs for a commit message generator.
@@ -30,7 +29,7 @@ real changes exist. Do not invent changes that are not in the diff."""
 def make_diff_analyst(
     llm: LLMProvider,
     max_diff_chars: int,
-) -> Callable[[AgentState], dict[str, object]]:
+) -> AgentNode:
     """Create the diff analyst node.
 
     The node renders the diff within ``max_diff_chars`` (so every later node

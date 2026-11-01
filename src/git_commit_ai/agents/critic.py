@@ -13,9 +13,7 @@ from git_commit_ai.core.exceptions import AgentStateError, LLMResponseError
 from git_commit_ai.llm.base import LLMMessage, Role
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from git_commit_ai.agents.state import DiffDigest
+    from git_commit_ai.agents.state import AgentNode, DiffDigest
     from git_commit_ai.llm.base import LLMProvider
 
 _SYSTEM_PROMPT = """You verify a commit message against the staged diff it describes.
@@ -36,7 +34,7 @@ class _Faithfulness(BaseModel):
     problems: list[str] = Field(default_factory=list)
 
 
-def make_critic(llm: LLMProvider) -> Callable[[AgentState], dict[str, object]]:
+def make_critic(llm: LLMProvider) -> AgentNode:
     """Create the critic node.
 
     Deterministic rules judge format, subject length, imperative mood, scope,

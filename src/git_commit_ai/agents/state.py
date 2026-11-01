@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
@@ -108,3 +109,11 @@ class AgentState(BaseModel):
         if self.context is None:
             raise AgentStateError("context")
         return self.diff_digest, self.analysis, self.context
+
+
+class AgentNode(Protocol):
+    """A graph node: reads the shared state, returns the fields it changed."""
+
+    def __call__(self, state: AgentState) -> dict[str, object]:
+        """Run the node and return a partial state update."""
+        ...
