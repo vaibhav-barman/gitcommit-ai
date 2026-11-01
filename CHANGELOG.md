@@ -27,6 +27,12 @@ No version has been released yet; everything below is under **Unreleased**.
   and diagnostics to stderr. `--yes` refuses to commit a draft left unfinished by a provider error
   unless `--accept-partial` is given. Handles nothing staged, empty repositories, binary-only diffs
   and very large diffs (budgeted per file, with a notice).
+- **Evaluation harness** (`scripts/eval/`, not installed): replays a repository's last N
+  non-merge commits through the agent graph, using each commit's diff against its parent and only
+  older commits as history, and scores the result with deterministic checks (convention, subject
+  length, imperative mood, capitalization, punctuation, scope and body agreement, critic findings
+  before and after reflection, rounds used). Writes JSON and Markdown reports; `--offline` uses a
+  deterministic stand-in for the model so it needs no network.
 - **`git ai-commit`** via a `git-ai-commit` console script, which also offers `config` and `hook`.
 - **Resilience**: rate limits and transient provider errors (timeouts, dropped connections, 5xx)
   are retried with bounded exponential backoff (`GITCOMMIT_AI_MAX_RETRIES`,

@@ -71,6 +71,13 @@ Do not use syntax newer than 3.11 (for example PEP 695 `def f[T]()` generics or 
 - Settings tests must not depend on a `.env` in your checkout: set `GITCOMMIT_AI_ENV_FILE` to an
   empty string (the CLI test modules do this in an autouse fixture).
 
+## Evaluation harness
+
+`scripts/eval/` replays a repository's history through the agent graph and scores the messages;
+see [scripts/eval/README.md](scripts/eval/README.md). It is tooling, not part of the installed
+package, but it is held to the same bar: strict mypy, Ruff, and tests in `tests/eval/` that run
+offline.
+
 ## Adding a provider
 
 Add `src/git_commit_ai/llm/<name>_provider.py` implementing `LLMProvider`, mapping SDK failures to
