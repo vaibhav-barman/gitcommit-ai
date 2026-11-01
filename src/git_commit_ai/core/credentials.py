@@ -212,6 +212,17 @@ def keyring_available() -> bool:
     return not isinstance(backend, fail.Keyring | null.Keyring)
 
 
+def migrate_keys(source: CredentialStore, destination: CredentialStore) -> None:
+    """Copy every key from ``source`` to ``destination``, then remove them from
+    ``source``. Nothing is removed unless every copy succeeded."""
+    keys = {provider: source.get(provider) for provider in source.saved_providers()}
+    for provider, key in keys.items():
+        if key:
+            destination.set(provider, key)
+    for provider in keys:
+        source.delete(provider)
+
+
 def open_credential_store(directory: Path, kind: CredentialStoreKind) -> CredentialStore:
     """The store ``config.toml`` asks for."""
     if kind is CredentialStoreKind.KEYRING:

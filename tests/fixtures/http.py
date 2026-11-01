@@ -47,8 +47,10 @@ class FakeHttp:
         self.calls: list[Call] = []
 
     def on(self, method: str, url: str, *responses: Responder) -> FakeHttp:
-        """Answer ``method url`` with ``responses``."""
-        self._routes.append((method.upper(), url.rstrip("/"), list(responses)))
+        """Answer ``method url`` with ``responses``, replacing any earlier route for it."""
+        key = (method.upper(), url.rstrip("/"))
+        self._routes = [r for r in self._routes if (r[0], r[1]) != key]
+        self._routes.append((*key, list(responses)))
         return self
 
     @property

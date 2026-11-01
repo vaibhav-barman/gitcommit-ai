@@ -31,9 +31,10 @@ flowchart LR
     context --> core["core"]
     git --> core
     llm --> core
+    onboarding["onboarding"] --> llm
 ```
 
-(The CLI also imports `context`, `core` and `llm` directly: it builds the provider and prints the deterministic reports. `agents` never imports `git`, and nothing below `cli` imports it.)
+(The CLI also imports `context`, `core` and `llm` directly: it builds the provider and prints the deterministic reports. `agents` never imports `git`, and nothing below `cli` imports it. `onboarding`, the setup wizard, imports only `llm` and `core`.)
 
 ```
 src/git_commit_ai/

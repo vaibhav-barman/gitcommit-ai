@@ -17,6 +17,7 @@ from git_commit_ai.core.credentials import (
     FileCredentialStore,
     KeyringCredentialStore,
     keyring_available,
+    migrate_keys,
     open_credential_store,
 )
 from git_commit_ai.core.exceptions import ConfigurationError
@@ -200,3 +201,27 @@ def test_keyring_errors_become_configuration_errors() -> None:
 
 def test_module_exposes_the_service_name() -> None:
     assert credentials.KEYRING_SERVICE == "gitcommit-ai"
+
+
+def test_migrate_keys_moves_every_key_then_clears_the_source(tmp_path: Path) -> None:
+    source = FileCredentialStore(tmp_path)
+    source.set(ProviderName.OPENAI, KEY_A)
+    source.set(ProviderName.GEMINI, KEY_B)
+    destination = KeyringCredentialStore(backend=FakeKeyring())
+    migrate_keys(source, destination)
+    assert destination.get(ProviderName.OPENAI) == KEY_A
+    assert destination.get(ProviderName.GEMINI) == KEY_B
+    assert source.saved_providers() == []
+
+
+def test_migrate_keys_leaves_the_source_alone_if_writing_fails(tmp_path: Path) -> None:
+    source = FileCredentialStore(tmp_path)
+    source.set(ProviderName.OPENAI, KEY_A)
+
+    class Locked(FakeKeyring):
+        def set_password(self, service: str, username: str, password: str) -> None:
+            raise RuntimeError("locked")
+
+    with pytest.raises(ConfigurationError):
+        migrate_keys(source, KeyringCredentialStore(backend=Locked()))
+    assert source.get(ProviderName.OPENAI) == KEY_A

@@ -327,7 +327,7 @@ class TestCompleteness:
 
     REAL = (
         "    cli --> agents\n    cli --> git\n    agents --> context\n    agents --> llm\n"
-        "    context --> core\n    git --> core\n    llm --> core"
+        "    context --> core\n    git --> core\n    llm --> core\n    onboarding --> llm"
     )
 
     def test_the_real_layering_passes(self, tmp_path: Path) -> None:

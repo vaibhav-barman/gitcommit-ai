@@ -163,6 +163,7 @@ flowchart LR
     context --> core["core"]
     git --> core
     llm --> core
+    onboarding["onboarding"] --> llm
 ```
 
 [`docs/architecture.md`](docs/architecture.md) has the state schema, node contracts, critic rules and design decisions.
@@ -321,6 +322,7 @@ gitcommit-ai/
 │   ├── context/    normalizer, convention detector, style analyzer, example selector, engine
 │   ├── llm/        provider protocol, HTTP layer, factory, retry, FakeLLM, backends
 │   ├── agents/     state, analyst, retrieval, generator, critic rules and node, graph
+│   ├── onboarding/ setup wizard, prompt adapters (menus or plain numbered), model menus
 │   └── cli/        main app, generate, config, hook, git subcommand entry point
 ├── scripts/
 │   ├── eval/       evaluation harness (not installed)

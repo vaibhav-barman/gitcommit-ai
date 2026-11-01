@@ -78,6 +78,9 @@ class ModelListing:
 class ModelCatalog(Protocol):
     """Setup-time questions for one provider and key."""
 
+    check_failure: str | None
+    """Why the last ``check_key`` returned ``UNKNOWN``; ``None`` otherwise."""
+
     def check_key(self) -> KeyCheck:
         """Ask the provider whether the key is accepted."""
         ...
@@ -125,6 +128,7 @@ class _Catalog:
         self._http = client
         self._sleep = sleep
         self._first_page: Any = None
+        self.check_failure: str | None = None
 
     def _call(self, request: Callable[[], _T]) -> _T:
         try:
@@ -137,11 +141,13 @@ class _Catalog:
             return request()
 
     def _check(self, request: Callable[[], object]) -> KeyCheck:
+        self.check_failure = None
         try:
             self._call(request)
         except AuthenticationError:
             return KeyCheck.INVALID
-        except LLMError:
+        except LLMError as exc:
+            self.check_failure = failure_reason(exc)
             return KeyCheck.UNKNOWN
         return KeyCheck.VALID
 
@@ -487,14 +493,21 @@ def detect_ollama(
     except AuthenticationError:
         return OllamaServer(True, None, True, None)
     except TransientLLMError as exc:
-        detail = str(exc).rsplit(": ", 1)[-1]
-        if "timed out" in detail:
-            detail = f"timed out after {SETUP_TIMEOUT:.0f}s"
-        return OllamaServer(False, None, False, detail)
+        return OllamaServer(False, None, False, failure_reason(exc))
     except LLMError as exc:
         return OllamaServer(False, None, False, str(exc))
     version = dig(body, "version")
     return OllamaServer(True, version if isinstance(version, str) else None, False, None)
+
+
+def failure_reason(error: LLMError) -> str:
+    """A short reason for a failed setup call, for "failed (...)" status lines."""
+    if isinstance(error, RateLimitError):
+        return "rate limited"
+    if isinstance(error, TransientLLMError):
+        detail = str(error).split(": ", 1)[-1]
+        return f"timed out after {SETUP_TIMEOUT:.0f}s" if "timed out" in detail else detail
+    return str(error)
 
 
 def _list(payload: Any, field: str) -> list[dict[str, Any]]:

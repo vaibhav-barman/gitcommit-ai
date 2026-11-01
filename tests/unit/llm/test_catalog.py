@@ -10,6 +10,7 @@ import pytest
 from git_commit_ai.core.config import ProviderName
 from git_commit_ai.core.exceptions import (
     AuthenticationError,
+    LLMError,
     ModelNotAvailableError,
     RateLimitError,
     TransientLLMError,
@@ -21,6 +22,7 @@ from git_commit_ai.llm.catalog import (
     ModelCatalog,
     catalog_for,
     detect_ollama,
+    failure_reason,
 )
 from git_commit_ai.llm.registry import spec
 from tests.fixtures.http import FakeHttp, json_response
@@ -412,3 +414,29 @@ class TestDetectOllama:
         server = detect_ollama(OLLAMA, None, http.transport)
         assert not server.reachable
         assert server.error == "HTTP 500"
+
+
+class TestFailureText:
+    def test_an_unknown_key_check_keeps_its_reason(self) -> None:
+        http = FakeHttp().on("GET", f"{OPENAI}/models", httpx.ReadTimeout("slow"))
+        catalog = _catalog(ProviderName.OPENAI, http)
+        assert catalog.check_key() is KeyCheck.UNKNOWN
+        assert catalog.check_failure == "timed out after 10s"
+
+    def test_a_valid_key_has_no_failure(self) -> None:
+        http = FakeHttp().on("GET", f"{OPENAI}/models", json_response(200, OPENAI_MODELS))
+        catalog = _catalog(ProviderName.OPENAI, http)
+        catalog.check_key()
+        assert catalog.check_failure is None
+
+    @pytest.mark.parametrize(
+        ("error", "text"),
+        [
+            (TransientLLMError("openai", "request timed out"), "timed out after 10s"),
+            (TransientLLMError("openai", "HTTP 503"), "HTTP 503"),
+            (RateLimitError("openai"), "rate limited"),
+            (AuthenticationError("openai", 401), "openai rejected the API key (HTTP 401)."),
+        ],
+    )
+    def test_failure_reason(self, error: LLMError, text: str) -> None:
+        assert failure_reason(error) == text

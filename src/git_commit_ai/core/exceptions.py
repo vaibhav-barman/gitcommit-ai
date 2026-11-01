@@ -63,6 +63,13 @@ class UnsupportedConfigVersionError(ConfigurationError):
         self.path = path
 
 
+class SetupCancelledError(GitCommitAIError):
+    """Raised when the user leaves setup (Ctrl+C, Ctrl+D, end of input, or "Cancel")."""
+
+    def __init__(self) -> None:
+        super().__init__("Setup cancelled; nothing was saved.")
+
+
 class LLMError(GitCommitAIError):
     """Base exception for failures originating from an LLM provider."""
 
