@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --python 3.13
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # All extras: the backend tests import every provider SDK (all mocked, no network).
+      - run: uv sync --all-extras --python ${{ matrix.python-version }}
+      - run: uv run mypy src tests
+      - run: uv run pytest
+
+  package:
+    name: Build and install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - name: Install the wheel into a clean environment and run both entry points
+        run: |
+          uv venv --python 3.13 "$RUNNER_TEMP/clean"
+          uv pip install --python "$RUNNER_TEMP/clean/bin/python" dist/*.whl
+          "$RUNNER_TEMP/clean/bin/gitcommit-ai" --help
+          "$RUNNER_TEMP/clean/bin/git-ai-commit" -h
+          "$RUNNER_TEMP/clean/bin/python" -c "import importlib.resources as r; assert r.files('git_commit_ai').joinpath('py.typed').is_file()"
