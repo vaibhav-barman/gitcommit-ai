@@ -19,6 +19,7 @@ from tests.fixtures.git_repo import (
     commit_count,
     head_message,
     init_repo,
+    install_hook,
     scoped_history_repo,
     stage_file,
 )
@@ -244,6 +245,106 @@ class TestBody:
         assert result.exit_code == 0
         assert "Add a short body after a blank line" in llm.calls[1][1].content
         assert result.stdout.strip() == f"{GOOD}\n\nAdds several modules."
+
+
+class TestAmend:
+    def test_message_covers_head_plus_staged_and_replaces_head(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm(["fix(api): handle empty orders list"])
+        use_llm(monkeypatch, llm)
+        before = commit_count(staged_repo)
+
+        result = _generate(staged_repo, "--amend", "--yes")
+
+        assert result.exit_code == 0
+        assert "Amending the last commit" in result.stderr
+        analyst_prompt = llm.calls[0][1].content
+        assert "src/api/orders.py" in analyst_prompt  # staged change
+        assert "src/api/users.py" in analyst_prompt  # the commit being amended
+        assert commit_count(staged_repo) == before
+        assert head_message(staged_repo) == "fix(api): handle empty orders list"
+
+    def test_the_commit_being_replaced_is_not_offered_as_an_example(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm(["fix(api): handle empty orders list"])
+        use_llm(monkeypatch, llm)
+
+        _generate(staged_repo, "--amend", "--dry-run")
+
+        generator_prompt = llm.calls[1][1].content
+        assert "fix(api): handle empty list" not in generator_prompt
+        assert "feat(api): add users endpoint" in generator_prompt
+
+    def test_amend_with_nothing_staged_rewords_the_last_commit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = scoped_history_repo(tmp_path / "repo")
+        use_llm(monkeypatch, scripted_llm(["fix(api): handle an empty users list"]))
+
+        result = _generate(repo, "--amend", "--yes")
+
+        assert result.exit_code == 0
+        assert head_message(repo) == "fix(api): handle an empty users list"
+
+    def test_nothing_to_amend_in_an_empty_repository(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = init_repo(tmp_path / "fresh")
+        use_llm(monkeypatch, scripted_llm(["docs: add readme"]))
+
+        result = _generate(repo, "--amend", "--dry-run")
+
+        assert result.exit_code == 1
+        assert "no commit to amend" in result.stderr
+
+    def test_head_moving_during_generation_blocks_the_amend(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        inner = scripted_llm(["fix(api): handle empty orders list"])
+
+        def move_head(messages: Sequence[LLMMessage]) -> str:
+            subprocess.run(
+                ["git", "-C", str(staged_repo), "commit", "--allow-empty", "-m", "chore: empty"],
+                check=True,
+                capture_output=True,
+            )
+            return inner.complete(messages)
+
+        use_llm(monkeypatch, FakeLLM(move_head))
+
+        result = _generate(staged_repo, "--amend", "--yes")
+
+        assert result.exit_code == 1
+        assert "nothing was committed" in result.stderr
+        assert head_message(staged_repo) == "chore: empty"
+
+
+class TestNoVerify:
+    def test_failing_pre_commit_hook_blocks_the_commit_by_default(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        install_hook(staged_repo, "pre-commit", "#!/bin/sh\necho lint failed >&2\nexit 1\n")
+        use_llm(monkeypatch, scripted_llm([GOOD]))
+        before = commit_count(staged_repo)
+
+        result = _generate(staged_repo, "--yes")
+
+        assert result.exit_code == 1
+        assert "lint failed" in result.stderr
+        assert commit_count(staged_repo) == before
+
+    def test_no_verify_skips_the_hook(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        install_hook(staged_repo, "pre-commit", "#!/bin/sh\nexit 1\n")
+        use_llm(monkeypatch, scripted_llm([GOOD]))
+
+        result = _generate(staged_repo, "--yes", "--no-verify")
+
+        assert result.exit_code == 0
+        assert head_message(staged_repo) == GOOD
 
 
 class TestCommitting:

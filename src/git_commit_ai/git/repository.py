@@ -87,6 +87,14 @@ class RepositoryInspector:
         _, detached = self._get_branch_info()
         return detached
 
+    def empty_tree_hash(self) -> str:
+        """Return the hash of the empty tree in this repository's object format.
+
+        Asked of Git rather than hard-coded, because the value differs between
+        SHA-1 and SHA-256 repositories. Nothing is written to the object store.
+        """
+        return self._run_git(["hash-object", "-t", "tree", "/dev/null"]).stdout.strip()
+
     def get_staged_files(self) -> list[str]:
         """Return a list of file paths staged for the next commit."""
         if self._is_empty_repository():

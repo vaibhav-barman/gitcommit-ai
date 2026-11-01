@@ -21,10 +21,15 @@ class FileStatus(enum.StrEnum):
 
 
 class DiffMode(enum.StrEnum):
-    """Which changes to diff."""
+    """Which changes to diff.
+
+    ``AMEND`` is the staged index against the parent of ``HEAD``: what the
+    commit would contain if ``HEAD`` were replaced by ``git commit --amend``.
+    """
 
     STAGED = "staged"
     UNSTAGED = "unstaged"
+    AMEND = "amend"
 
 
 class RepositoryInfo(BaseModel):
@@ -109,6 +114,10 @@ class RepositorySnapshot(BaseModel):
     """Snapshot of the staged tree identity for staleness detection."""
 
     tree_hash: str = Field(description="Hash of the staged tree object")
+    head_hash: str | None = Field(
+        default=None,
+        description="Commit HEAD pointed to at snapshot time (None in an empty repository)",
+    )
     staged_files: list[str] = Field(
         default_factory=list,
         description="Sorted list of staged file paths at snapshot time",
@@ -119,8 +128,12 @@ class RepositorySnapshot(BaseModel):
     )
 
     def matches(self, other: RepositorySnapshot) -> bool:
-        """Return True if both snapshots represent the same staged state."""
-        return self.tree_hash == other.tree_hash
+        """Return True if both snapshots represent the same staged state.
+
+        The same staged tree is not the same change if ``HEAD`` moved, since the
+        diff against ``HEAD`` (or its parent, when amending) would differ.
+        """
+        return self.tree_hash == other.tree_hash and self.head_hash == other.head_hash
 
 
 # ---------------------------------------------------------------------------

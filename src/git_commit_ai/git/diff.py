@@ -49,7 +49,7 @@ class DiffExtractor:
         """Extract diff output, per-file changes, and statistics.
 
         Args:
-            mode: ``DiffMode.STAGED`` or ``DiffMode.UNSTAGED``.
+            mode: ``DiffMode.STAGED``, ``UNSTAGED`` or ``AMEND``.
                   Defaults to the configured default diff mode.
 
         Returns:
@@ -141,7 +141,16 @@ class DiffExtractor:
         """Build the base diff command arguments for the given mode."""
         if mode == DiffMode.STAGED:
             return ["diff", "--cached"]
+        if mode == DiffMode.AMEND:
+            return ["diff", "--cached", self._amend_base()]
         return ["diff"]
+
+    def _amend_base(self) -> str:
+        """Revision an amended commit would be built on: HEAD's parent, or the empty tree."""
+        parent = self._inspector._run_git(["rev-parse", "--verify", "HEAD^"], check=False)
+        return (
+            parent.stdout.strip() if parent.returncode == 0 else self._inspector.empty_tree_hash()
+        )
 
     @staticmethod
     def _resolve_rename_paths(path: str) -> tuple[str, str]:

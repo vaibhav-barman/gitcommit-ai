@@ -37,7 +37,7 @@ class SnapshotManager:
         """Capture the current staged-tree identity.
 
         Returns:
-            A ``RepositorySnapshot`` containing the tree hash and staged files.
+            A ``RepositorySnapshot`` containing the tree hash, ``HEAD`` and staged files.
 
         Note:
             In a repository with no staged changes the tree hash will be the
@@ -47,6 +47,7 @@ class SnapshotManager:
         staged_files = sorted(self._inspector.get_staged_files())
         return RepositorySnapshot(
             tree_hash=tree_hash,
+            head_hash=self._get_head_hash(),
             staged_files=staged_files,
             timestamp=datetime.now(),
         )
@@ -73,6 +74,11 @@ class SnapshotManager:
         current = self.capture()
         return not self.compare(snapshot, current)
 
+    def _get_head_hash(self) -> str | None:
+        """Return the commit HEAD points to, or ``None`` in an empty repository."""
+        result = self._inspector._run_git(["rev-parse", "--verify", "HEAD"], check=False)
+        return result.stdout.strip() if result.returncode == 0 else None
+
     def _get_staged_tree_hash(self) -> str:
         """Compute the tree hash of the current index.
 
@@ -85,5 +91,5 @@ class SnapshotManager:
         )
         if result.returncode != 0:
             # Fallback: hash of the empty tree
-            return "4b825dc642cb6eb9a060e54bf899d69f82cf7149"
+            return self._inspector.empty_tree_hash()
         return result.stdout.strip()

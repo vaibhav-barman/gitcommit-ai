@@ -17,7 +17,7 @@ class GitCommitter:
 
     This is the only component that writes to the repository, and it never
     stages or unstages anything: it commits exactly what is already staged.
-    Git hooks run as usual.
+    Git hooks run as usual unless ``no_verify`` is set.
 
     Args:
         inspector: A ``RepositoryInspector`` bound to the target repository.
@@ -28,12 +28,22 @@ class GitCommitter:
         self._inspector = inspector
         self._snapshots = snapshots
 
-    def commit(self, message: str, expected: RepositorySnapshot) -> str:
+    def commit(
+        self,
+        message: str,
+        expected: RepositorySnapshot,
+        *,
+        amend: bool = False,
+        no_verify: bool = False,
+    ) -> str:
         """Commit the staged changes with ``message``.
 
         Args:
             message: Full commit message (subject, optional body and footers).
-            expected: Snapshot captured before the message was generated.
+            expected: Snapshot captured before the message was generated. It
+                includes ``HEAD``, so amending a commit that moved is refused too.
+            amend: Replace ``HEAD`` instead of adding a commit.
+            no_verify: Skip the pre-commit and commit-msg hooks.
 
         Returns:
             The abbreviated hash of the new commit.
@@ -44,6 +54,11 @@ class GitCommitter:
         """
         if self._snapshots.has_changed_since(expected):
             raise StaleStagingError()
-        self._inspector._run_git(["commit", "-m", message])
+        args = ["commit", "-m", message]
+        if amend:
+            args.append("--amend")
+        if no_verify:
+            args.append("--no-verify")
+        self._inspector._run_git(args)
         head = self._inspector._run_git(["rev-parse", "--short", "HEAD"])
         return head.stdout.strip()

@@ -38,6 +38,14 @@ def generate(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the message without committing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Commit without asking for confirmation."),
+    amend: bool = typer.Option(
+        False,
+        "--amend",
+        help="Replace the last commit; the message describes it plus any staged changes.",
+    ),
+    no_verify: bool = typer.Option(
+        False, "--no-verify", help="Skip the pre-commit and commit-msg hooks when committing."
+    ),
     hint: str | None = typer.Option(
         None,
         "--hint",
@@ -58,6 +66,8 @@ def generate(
 
     The message is printed to stdout; progress and diagnostics go to stderr.
     Unless --dry-run is given, you are asked to confirm before committing.
+    With --amend the last commit is replaced. Its own message is not used as
+    an example, and the message is written for the combined change.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -70,15 +80,26 @@ def generate(
         config = settings.config
         inspector = RepositoryInspector(repo_path=path, config=config)
         info = inspector.inspect()
-        diff = DiffExtractor(inspector=inspector, config=config).extract(DiffMode.STAGED)
+        if amend and info.is_empty:
+            _fail("There is no commit to amend.")
+        mode = DiffMode.AMEND if amend else DiffMode.STAGED
+        diff = DiffExtractor(inspector=inspector, config=config).extract(mode)
         if not diff.file_changes:
-            _fail(_nothing_staged_message(info))
+            _fail(
+                "The commit to amend has no changes to describe."
+                if amend
+                else _nothing_staged_message(info)
+            )
 
-        history = CommitHistoryExtractor(inspector=inspector, config=config).get_history()
+        history = CommitHistoryExtractor(inspector=inspector, config=config).get_history(
+            exclude_head=amend
+        )
         snapshots = SnapshotManager(inspector, config)
         snapshot = snapshots.capture()
 
         llm = create_provider(config, env=settings.environment, on_retry=_announce_retry)
+        if amend:
+            _note("Amending the last commit; the message covers it together with staged changes.")
         _note(f"Generating a commit message with {llm.name}/{llm.model}...")
         result = CommitMessageGraph(llm, config).run(diff, history, hint=hint)
 
@@ -92,7 +113,9 @@ def generate(
             return
         if not yes:
             typer.confirm("Commit with this message?", abort=True, err=True)
-        short_hash = GitCommitter(inspector, snapshots).commit(result.message, snapshot)
+        short_hash = GitCommitter(inspector, snapshots).commit(
+            result.message, snapshot, amend=amend, no_verify=no_verify
+        )
         _note(f"Committed {short_hash}")
     except GitCommitAIError as exc:
         _fail(str(exc))

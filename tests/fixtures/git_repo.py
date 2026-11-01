@@ -114,3 +114,23 @@ def scoped_history_repo(path: Path, with_bodies: bool = False) -> Path:
     for filename, content, subject in history:
         commit_file(repo, filename, content, subject + suffix)
     return repo
+
+
+def install_hook(repo_path: Path, name: str, script: str) -> Path:
+    """Write an executable Git hook into the repository's hooks directory."""
+    hook = repo_path / ".git" / "hooks" / name
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(script, encoding="utf-8")
+    hook.chmod(0o755)
+    return hook
+
+
+def head_hash(repo_path: Path) -> str:
+    """Return the full hash of HEAD."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
