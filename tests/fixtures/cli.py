@@ -16,18 +16,16 @@ class Created:
 
     def __init__(self) -> None:
         self.configs: list[GitCommitAIConfig] = []
-        self.envs: list[dict[str, str]] = []
+        self.api_keys: list[str | None] = []
 
 
 def use_llm(monkeypatch: pytest.MonkeyPatch, llm: FakeLLM) -> Created:
-    """Make the CLI use ``llm`` and record the config and environment it was given."""
+    """Make the CLI use ``llm`` and record the config and API key it was given."""
     created = Created()
 
-    def fake_create(
-        config: GitCommitAIConfig, env: dict[str, str] | None = None, **_: object
-    ) -> FakeLLM:
+    def fake_create(config: GitCommitAIConfig, api_key: str | None, **_: object) -> FakeLLM:
         created.configs.append(config)
-        created.envs.append(dict(env or {}))
+        created.api_keys.append(api_key)
         return llm
 
     monkeypatch.setattr("git_commit_ai.cli.generate.create_provider", fake_create)

@@ -108,7 +108,8 @@ def generate(
         snapshots = SnapshotManager(inspector, config)
         snapshot = snapshots.capture()
 
-        llm = create_provider(config, env=settings.environment, on_retry=_announce_retry)
+        key = settings.api_key_for(config.llm_provider)
+        llm = create_provider(config, key.value if key else None, on_retry=_announce_retry)
         if amend:
             _note("Amending the last commit; the message covers it together with staged changes.")
         _note(f"Generating a commit message with {llm.name}/{llm.model}...")

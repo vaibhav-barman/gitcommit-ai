@@ -212,15 +212,19 @@ Settings are resolved in this order, highest priority first:
 1. **Command-line flags** (`--provider`, `--model`, `--max-iterations`)
 2. **Environment variables**
 3. **A `.env` file**, read from the current directory or, failing that, the root of the Git repository. Parent directories above the repository root and your home directory are never searched
-4. **Defaults**
+4. **The saved config file**, `config.toml` in your per-user config directory (`GITCOMMIT_AI_CONFIG_DIR`). It never holds API keys; saved keys live next to it in `credentials.toml`, readable only by you
+5. **Defaults**
+
+API keys follow the same order: a key variable in the environment, then in `.env`, then the saved key.
 
 The `.env` file is parsed into memory only and never exported into the process environment. Blank values count as unset. Set `GITCOMMIT_AI_ENV_FILE` to use a specific file, or to an empty string to skip `.env` loading. [`.env.example`](.env.example) is a template. `git-ai-commit config` shows what is in effect:
 
 ```text
 $ git-ai-commit config
 Effective settings
-  Precedence: flags > environment > .env > defaults
+  Precedence: flags > environment > .env > config file > defaults
   .env file:  none found
+  Config file: none
 
   GITCOMMIT_AI_PROVIDER          openai                           [default]
   GITCOMMIT_AI_MODEL             (provider default: gpt-4o-mini)  [default]
@@ -308,7 +312,7 @@ API keys
 ```text
 gitcommit-ai/
 ├── src/git_commit_ai/
-│   ├── core/       config, settings (flags > env > .env), schemas, exceptions
+│   ├── core/       config, settings (flags > env > .env > config file), saved config and keys, schemas, exceptions
 │   ├── git/        repository, diff, history, snapshots, committer, hook installer
 │   ├── context/    normalizer, convention detector, style analyzer, example selector, engine
 │   ├── llm/        provider protocol, factory, retry, FakeLLM, four backends

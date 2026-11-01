@@ -147,7 +147,7 @@ class TestFactoryWiring:
             llm_retry_base_delay_seconds=0.5,
             llm_retry_max_delay_seconds=9,
         )
-        provider = create_provider(config, env={})
+        provider = create_provider(config, api_key=None)
         assert isinstance(provider, RetryingProvider)
         assert provider._policy == RetryPolicy(7, 0.5, 9)
         assert provider.name == "ollama"

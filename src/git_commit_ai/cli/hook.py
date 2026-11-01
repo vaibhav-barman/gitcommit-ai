@@ -110,7 +110,8 @@ def _propose(message_file: Path, source: str, path: str) -> None:
     history = CommitHistoryExtractor(inspector=inspector, config=config).get_history()
 
     typer.secho("git-ai-commit: writing a proposed message...", err=True)
-    llm = create_provider(config, env=settings.environment)
+    key = settings.api_key_for(config.llm_provider)
+    llm = create_provider(config, key.value if key else None)
     result = CommitMessageGraph(llm, config).run(diff, history)
 
     separator = "" if not existing or existing.startswith("\n") else "\n"

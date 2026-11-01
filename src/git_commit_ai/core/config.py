@@ -36,6 +36,19 @@ ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_MAX_DIFF_CHARS": "max_prompt_diff_chars",
 }
 
+# Variables that hold each provider's API key, canonical name first. Ollama needs none.
+PROVIDER_KEY_VARIABLES: dict[ProviderName, tuple[str, ...]] = {
+    ProviderName.OPENAI: ("OPENAI_API_KEY",),
+    ProviderName.ANTHROPIC: ("ANTHROPIC_API_KEY",),
+    ProviderName.GEMINI: ("GOOGLE_API_KEY",),
+    ProviderName.OLLAMA: (),
+}
+
+
+def config_key(variable: str) -> str:
+    """The ``config.toml`` key for a ``GITCOMMIT_AI_*`` variable: ``GITCOMMIT_AI_X`` is ``x``."""
+    return variable.removeprefix("GITCOMMIT_AI_").lower()
+
 
 class GitCommitAIConfig(BaseModel):
     """Application configuration with sensible defaults.
@@ -132,15 +145,29 @@ class GitCommitAIConfig(BaseModel):
             ConfigurationError: If a variable holds an invalid value.
         """
         values = {field: env[var] for var, field in ENV_FIELDS.items() if env.get(var)}
+        return cls.from_values(values, {field: var for var, field in ENV_FIELDS.items()})
+
+    @classmethod
+    def from_values(
+        cls, values: Mapping[str, object], labels: Mapping[str, str]
+    ) -> GitCommitAIConfig:
+        """Validate ``values`` (field name to raw value). An error names each bad field by
+        its label in ``labels``, such as the variable or config key it came from.
+
+        Raises:
+            ConfigurationError: If a value is invalid.
+        """
         try:
-            return cls.model_validate(values)
+            return cls.model_validate(dict(values))
         except ValidationError as exc:
             problems = "; ".join(
-                f"{_env_var_for(str(err['loc'][0]))}: {err['msg']}" for err in exc.errors()
+                f"{_label(err['loc'], labels)}: {err['msg']}" for err in exc.errors()
             )
             raise ConfigurationError(f"Invalid configuration: {problems}") from exc
 
 
-def _env_var_for(field: str) -> str:
-    """Return the environment variable that populates a config field."""
-    return next((var for var, name in ENV_FIELDS.items() if name == field), field)
+def _label(location: tuple[int | str, ...], labels: Mapping[str, str]) -> str:
+    """Name a validation error's field the way the user set it."""
+    if not location:
+        return "settings"
+    return labels.get(str(location[0]), str(location[0]))

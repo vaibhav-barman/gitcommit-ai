@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+
 import typer
 
 from git_commit_ai.cli.settings_loader import load_cli_settings
 from git_commit_ai.core.config import ENV_FIELDS, ProviderName
 from git_commit_ai.core.exceptions import GitCommitAIError
+from git_commit_ai.core.paths import config_dir
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE, mask_secret
+from git_commit_ai.core.user_config import CONFIG_FILE
 from git_commit_ai.llm.factory import api_key_variable, default_model
 
 
@@ -15,8 +19,8 @@ def config() -> None:
     """Show the effective settings, their sources, and masked API keys.
 
     Precedence is: command-line flags, then environment variables, then the
-    nearest .env file, then defaults. Flags are per-invocation, so they are not
-    shown here.
+    nearest .env file, then the saved config file, then defaults. Flags are
+    per-invocation, so they are not shown here.
     """
     try:
         settings = load_cli_settings()
@@ -26,8 +30,10 @@ def config() -> None:
 
     values = settings.config.model_dump(mode="json")
     typer.secho("Effective settings", bold=True)
-    typer.echo("  Precedence: flags > environment > .env > defaults")
+    config_path = config_dir(os.environ) / CONFIG_FILE
+    typer.echo("  Precedence: flags > environment > .env > config file > defaults")
     typer.echo(f"  .env file:  {settings.dotenv_path or 'none found'}")
+    typer.echo(f"  Config file: {config_path if settings.user_config else 'none'}")
     typer.echo()
 
     rows: list[tuple[str, str, str, str]] = []
@@ -38,7 +44,7 @@ def config() -> None:
             shown = f"(provider default: {default_model(provider)})"
         else:
             shown = str(value)
-        rows.append((variable, shown, settings.source_of_variable(variable).value, field_name))
+        rows.append((variable, shown, settings.source_of_field(field_name).value, field_name))
 
     name_width = max(len(row[0]) for row in rows)
     value_width = max(len(row[1]) for row in rows)
@@ -52,9 +58,9 @@ def config() -> None:
         if key_variable is None:
             typer.echo(f"  {backend.value:<9} no key needed")
             continue
-        secret = settings.environment.get(key_variable, "")
-        status = mask_secret(secret) if secret else "not set"
-        origin = f"  [{settings.source_of_variable(key_variable).value}]" if secret else ""
+        key = settings.api_key_for(backend)
+        status = mask_secret(key.value) if key else "not set"
+        origin = f"  [{key.source.value}]" if key else ""
         typer.echo(f"  {backend.value:<9} {key_variable} = {status}{origin}")
 
     typer.echo()

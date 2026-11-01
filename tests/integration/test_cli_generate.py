@@ -158,7 +158,9 @@ class TestDegradation:
     def test_retries_are_announced(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def announce(config: GitCommitAIConfig, on_retry: object = None, **_: object) -> FakeLLM:
+        def announce(
+            config: GitCommitAIConfig, api_key: str | None, on_retry: object = None
+        ) -> FakeLLM:
             assert callable(on_retry)
             on_retry(RetryEvent("openai", 1, 3, 2.0, RateLimitError("openai")))
             return scripted_llm([GOOD])

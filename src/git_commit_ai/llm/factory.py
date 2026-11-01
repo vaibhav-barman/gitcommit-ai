@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import importlib
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import PROVIDER_KEY_VARIABLES, ProviderName
 from git_commit_ai.core.exceptions import MissingAPIKeyError, ProviderNotInstalledError
 from git_commit_ai.llm.retry import RetryingProvider, RetryPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
     from git_commit_ai.core.config import GitCommitAIConfig
     from git_commit_ai.llm.base import LLMProvider
@@ -26,7 +25,6 @@ class _BackendSpec:
     extra: str
     default_model: str
     credential_arg: str
-    key_env_var: str | None
 
 
 _BACKENDS: dict[ProviderName, _BackendSpec] = {
@@ -36,7 +34,6 @@ _BACKENDS: dict[ProviderName, _BackendSpec] = {
         "openai",
         "gpt-4o-mini",
         "api_key",
-        "OPENAI_API_KEY",
     ),
     ProviderName.ANTHROPIC: _BackendSpec(
         "git_commit_ai.llm.anthropic_provider",
@@ -44,7 +41,6 @@ _BACKENDS: dict[ProviderName, _BackendSpec] = {
         "anthropic",
         "claude-sonnet-5-5",
         "api_key",
-        "ANTHROPIC_API_KEY",
     ),
     ProviderName.GEMINI: _BackendSpec(
         "git_commit_ai.llm.gemini_provider",
@@ -52,7 +48,6 @@ _BACKENDS: dict[ProviderName, _BackendSpec] = {
         "gemini",
         "gemini-2.5-flash",
         "api_key",
-        "GOOGLE_API_KEY",
     ),
     ProviderName.OLLAMA: _BackendSpec(
         "git_commit_ai.llm.ollama_provider",
@@ -60,7 +55,6 @@ _BACKENDS: dict[ProviderName, _BackendSpec] = {
         "ollama",
         "llama3.1",
         "base_url",
-        None,
     ),
 }
 
@@ -72,12 +66,13 @@ def default_model(provider: ProviderName) -> str:
 
 def api_key_variable(provider: ProviderName) -> str | None:
     """Environment variable holding ``provider``'s API key, or ``None`` if it needs none."""
-    return _BACKENDS[provider].key_env_var
+    variables = PROVIDER_KEY_VARIABLES[provider]
+    return variables[0] if variables else None
 
 
 def create_provider(
     config: GitCommitAIConfig,
-    env: Mapping[str, str] | None = None,
+    api_key: str | None,
     on_retry: Callable[[RetryEvent], None] | None = None,
 ) -> LLMProvider:
     """Instantiate the backend selected by ``config.llm_provider``.
@@ -90,22 +85,23 @@ def create_provider(
 
     Args:
         config: Application configuration (provider, model, temperature, timeout).
-        env: Environment to read API keys from; defaults to ``os.environ``.
+        api_key: The provider's key, already resolved from the environment, ``.env`` or
+            the credential store; ignored by providers that need none.
         on_retry: Called before each retry wait, for progress reporting.
 
     Raises:
         MissingAPIKeyError: If the provider needs a key and none is set.
         ProviderNotInstalledError: If the provider's SDK extra is not installed.
     """
-    environment = os.environ if env is None else env
     spec = _BACKENDS[config.llm_provider]
     model = config.llm_model or spec.default_model
 
     credential = config.ollama_base_url
-    if spec.key_env_var is not None:
-        credential = environment.get(spec.key_env_var, "")
-        if not credential:
-            raise MissingAPIKeyError(config.llm_provider.value, spec.key_env_var)
+    key_variable = api_key_variable(config.llm_provider)
+    if key_variable is not None:
+        if not api_key:
+            raise MissingAPIKeyError(config.llm_provider.value, key_variable)
+        credential = api_key
 
     try:
         module = importlib.import_module(spec.module)
