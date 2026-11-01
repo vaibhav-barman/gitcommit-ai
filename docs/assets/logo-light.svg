@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="96" viewBox="0 0 400 96" role="img" aria-labelledby="t">
+  <title id="t">GitCommit AI</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(8 8)">
+    <rect width="80" height="80" rx="22" fill="url(#g)"/>
+    <g fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M30 22V58"/>
+      <path d="M30 46C30 36 50 40 50 34"/>
+    </g>
+    <circle cx="30" cy="22" r="6" fill="#ffffff"/>
+    <circle cx="30" cy="58" r="6" fill="#ffffff"/>
+    <path d="M50 12L53 21L62 24L53 27L50 36L47 27L38 24L47 21Z" fill="#ffffff"/>
+  </g>
+  <text x="104" y="60" font-family="'SF Mono','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace" font-size="40" font-weight="600" textLength="288" lengthAdjust="spacingAndGlyphs" fill="#0f172a">GitCommit <tspan fill="url(#g)">AI</tspan></text>
+</svg>
