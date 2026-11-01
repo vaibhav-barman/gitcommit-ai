@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -13,13 +13,15 @@ from git_commit_ai.llm.base import LLMMessage, Role
 if TYPE_CHECKING:
     from git_commit_ai.llm.base import LLMProvider
 
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
-def complete_json[T: BaseModel](
+
+def complete_json(
     llm: LLMProvider,
     messages: list[LLMMessage],
-    model_type: type[T],
+    model_type: type[ModelT],
     retries: int = 1,
-) -> T:
+) -> ModelT:
     """Ask the LLM for a JSON object and validate it against ``model_type``.
 
     On an unparsable or invalid reply the validation error is fed back to the

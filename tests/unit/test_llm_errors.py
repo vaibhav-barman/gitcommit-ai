@@ -29,7 +29,9 @@ def test_missing_key_message_names_env_var() -> None:
 
 
 def test_not_installed_message_gives_install_command() -> None:
-    assert "gitcommit-ai[gemini]" in str(ProviderNotInstalledError("gemini", "gemini"))
+    message = str(ProviderNotInstalledError("gemini", "gemini"))
+    assert "pip install 'gitcommit-ai[gemini]'" in message
+    assert "pipx install --force 'gitcommit-ai[gemini]'" in message
 
 
 def test_rate_limit_includes_retry_hint_when_known() -> None:

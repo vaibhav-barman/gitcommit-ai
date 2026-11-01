@@ -3,16 +3,34 @@ name = "gitcommit-ai"
 version = "0.1.0"
 description = "An agentic Git commit message generator powered by AI"
 readme = "README.md"
+keywords = ["git", "commit", "llm", "ai", "langgraph", "conventional-commits"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Version Control :: Git",
+    "Typing :: Typed",
+]
 authors = [
     { name = "Vaibhav", email = "vaibhavbarman2609@gmail.com" },
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.6,<2.0",
     "pydantic>=2.0,<3.0",
     "python-dotenv>=1.0,<2.0",
     "typer>=0.15.0,<1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/vaibhav-barman/gitcommit-ai"
+Repository = "https://github.com/vaibhav-barman/gitcommit-ai"
+Issues = "https://github.com/vaibhav-barman/gitcommit-ai/issues"
+Changelog = "https://github.com/vaibhav-barman/gitcommit-ai/blob/main/CHANGELOG.md"
 
 [project.scripts]
 gitcommit-ai = "git_commit_ai.cli.main:app"
@@ -49,12 +67,24 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/git_commit_ai"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/LICENSE",
+    "/.env.example",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 src = ["src", "tests"]
 line-length = 99
 
@@ -82,7 +112,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 "tests/*" = ["TCH"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

@@ -73,7 +73,8 @@ class ProviderNotInstalledError(LLMError):
     def __init__(self, provider: str, extra: str) -> None:
         super().__init__(
             f"The '{provider}' provider needs its SDK. "
-            f"Install it with: pip install 'gitcommit-ai[{extra}]'"
+            f"Install it with: pip install 'gitcommit-ai[{extra}]' "
+            f"(installed with pipx? use: pipx install --force 'gitcommit-ai[{extra}]')"
         )
         self.provider = provider
         self.extra = extra
