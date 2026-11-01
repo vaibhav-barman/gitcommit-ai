@@ -247,6 +247,7 @@ API keys
 | `GITCOMMIT_AI_MAX_ITERATIONS` | `3` | Generate/critique rounds (1–10) |
 | `GITCOMMIT_AI_MAX_DIFF_CHARS` | `24000` | Diff characters sent to the model (min 1000) |
 | `GITCOMMIT_AI_ENV_FILE` | none | A specific env file, or empty to skip `.env` loading |
+| `GITCOMMIT_AI_CONFIG_DIR` | per OS | Directory for the saved settings and keys (`config.toml`, `credentials.toml`); by default `~/.config/gitcommit-ai`, or `%APPDATA%\gitcommit-ai` on Windows |
 | `GITCOMMIT_AI_HOOK` | unset | Set to `0` to skip the commit hook for one commit |
 
 </details>

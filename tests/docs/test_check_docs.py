@@ -63,6 +63,7 @@ class TestTheRealDocuments:
         known = known_environment_variables()
         assert {"GITCOMMIT_AI_PROVIDER", "GITCOMMIT_AI_ENV_FILE", "GITCOMMIT_AI_HOOK"} <= known
         assert {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"} <= known
+        assert "GITCOMMIT_AI_CONFIG_DIR" in known
 
 
 class TestFlagsAndVariables:
@@ -197,7 +198,10 @@ class TestPathsAndLinks:
     def test_generated_and_non_path_text_is_ignored(
         self, tmp_path: Path, surface: CliSurface
     ) -> None:
-        text = "`docs/assets/demo.gif`, `/tmp/x`, `+/-`, `src/<x>`, `a b/c.py`, `~/f`\n"
+        text = (
+            "`docs/assets/demo.gif`, `/tmp/x`, `+/-`, `src/<x>`, `a b/c.py`, `~/f`, "
+            "`config.toml`, `credentials.toml`\n"
+        )
         assert _check(tmp_path, surface, text) == []
 
     def test_a_broken_relative_link_is_reported(self, tmp_path: Path, surface: CliSurface) -> None:

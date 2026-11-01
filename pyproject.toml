@@ -54,12 +54,16 @@ ollama = [
 all = [
     "gitcommit-ai[openai,anthropic,gemini,ollama]",
 ]
+keyring = [
+    "keyring>=25.0,<26.0",
+]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0,<9.0",
     "ruff>=0.11.0,<1.0",
     "mypy>=1.15.0,<2.0",
+    "keyring>=25.0,<26.0",
 ]
 
 [build-system]

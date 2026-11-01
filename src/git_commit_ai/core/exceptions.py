@@ -52,6 +52,17 @@ class ConfigurationError(GitCommitAIError):
     """Raised when configuration values or environment variables are invalid."""
 
 
+class UnsupportedConfigVersionError(ConfigurationError):
+    """Raised when writing a config file that a newer version of the tool created."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"{path} was written by a newer gitcommit-ai, so it is not changed. "
+            "Upgrade gitcommit-ai, or run git ai-commit reset."
+        )
+        self.path = path
+
+
 class LLMError(GitCommitAIError):
     """Base exception for failures originating from an LLM provider."""
 

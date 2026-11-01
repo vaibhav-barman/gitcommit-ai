@@ -25,6 +25,7 @@ from typer.core import TyperGroup, TyperOption
 from git_commit_ai.cli.git_subcommand import git_app
 from git_commit_ai.cli.main import app as main_app
 from git_commit_ai.core.config import ENV_FIELDS, GitCommitAIConfig, ProviderName
+from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from git_commit_ai.git.hooks import SKIP_VARIABLE
 from git_commit_ai.llm.factory import api_key_variable, default_model
@@ -70,8 +71,17 @@ EXTERNAL_FLAGS: dict[str, str] = {
     "--version": "every tool",
 }
 EXTERNAL_SHORT_FLAGS = {"-m", "-F", "-c", "-C", "-p", "-h", "-n", "-o", "-v", "-y", "-u", "-M"}
-# Paths a document may name that are produced by running something, not committed.
-GENERATED_PATHS = {DEMO_GIF, "eval-output", "report.json", "report.md", ".env"}
+# Paths a document may name that are produced by running something, not committed. The
+# config and credentials files live in the per-user config directory, never in the repository.
+GENERATED_PATHS = {
+    DEMO_GIF,
+    "eval-output",
+    "report.json",
+    "report.md",
+    ".env",
+    "config.toml",
+    "credentials.toml",
+}
 _PATH_SUFFIXES = (".md", ".py", ".yml", ".yaml", ".toml", ".tape", ".sh", ".svg", ".gif", ".json")
 _NOT_REPO_PATH_PREFIXES = ("/", "~", "$", "http", "git@", "<", ".git/")
 _SRC = ROOT / "src" / "git_commit_ai"
@@ -144,7 +154,11 @@ def collect_cli_surface() -> CliSurface:
 def known_environment_variables() -> set[str]:
     """Every environment variable the code reads."""
     keys = {api_key_variable(provider) for provider in ProviderName}
-    return set(ENV_FIELDS) | {ENV_FILE_VARIABLE, SKIP_VARIABLE} | {k for k in keys if k}
+    return (
+        set(ENV_FIELDS)
+        | {ENV_FILE_VARIABLE, SKIP_VARIABLE, CONFIG_DIR_VARIABLE}
+        | {k for k in keys if k}
+    )
 
 
 def import_edges(package: Path = _SRC) -> set[tuple[str, str]]:

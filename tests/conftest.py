@@ -6,7 +6,34 @@ from pathlib import Path
 
 import pytest
 
+from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
 from tests.fixtures.git_repo import commit_file, init_repo
+
+# Variables that would let a developer's own setup leak into a test.
+_ISOLATED_VARIABLES = (
+    "GITCOMMIT_AI_PROVIDER",
+    "GITCOMMIT_AI_MODEL",
+    "GITCOMMIT_AI_COMMIT_MODE",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "HF_TOKEN",
+    "OLLAMA_API_KEY",
+    "CI",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the per-user config at a temporary directory and clear provider variables,
+    so no test reads or writes the real ``~/.config/gitcommit-ai``."""
+    directory = tmp_path / "user-config"
+    monkeypatch.setenv(CONFIG_DIR_VARIABLE, str(directory))
+    for variable in _ISOLATED_VARIABLES:
+        monkeypatch.delenv(variable, raising=False)
+    return directory
 
 
 @pytest.fixture
