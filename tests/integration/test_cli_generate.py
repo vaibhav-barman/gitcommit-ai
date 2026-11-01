@@ -170,6 +170,65 @@ class TestDegradation:
         assert result.exit_code == 0
         assert "Retrying in 2s (1/3)" in result.stderr
 
+    def test_yes_refuses_to_commit_an_interrupted_draft(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_llm(monkeypatch, scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")}))
+        before = commit_count(staged_repo)
+
+        result = _generate(staged_repo, "--yes")
+
+        assert result.exit_code == 1
+        assert commit_count(staged_repo) == before
+        assert "Not committing: the run stopped early" in result.stderr
+        assert "--accept-partial" in result.stderr
+        assert result.stdout.strip() == GOOD
+
+    def test_accept_partial_lets_yes_commit_an_interrupted_draft(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_llm(monkeypatch, scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")}))
+        before = commit_count(staged_repo)
+
+        result = _generate(staged_repo, "--yes", "--accept-partial")
+
+        assert result.exit_code == 0
+        assert commit_count(staged_repo) == before + 1
+        assert head_message(staged_repo) == GOOD
+        assert "Stopped early" in result.stderr
+
+    def test_yes_still_commits_an_uninterrupted_run(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_llm(monkeypatch, scripted_llm([GOOD]))
+
+        result = _generate(staged_repo, "--yes")
+
+        assert result.exit_code == 0
+        assert head_message(staged_repo) == GOOD
+
+    def test_without_yes_an_interrupted_draft_goes_to_the_prompt(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_llm(monkeypatch, scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")}))
+        before = commit_count(staged_repo)
+
+        result = _generate(staged_repo, "--accept-partial", stdin="n\n")
+
+        assert result.exit_code == 1
+        assert commit_count(staged_repo) == before
+        assert "Commit with this message?" in result.stderr
+
+    def test_dry_run_with_yes_is_not_an_error_for_an_interrupted_draft(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_llm(monkeypatch, scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")}))
+
+        result = _generate(staged_repo, "--dry-run", "--yes")
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == GOOD
+
 
 class TestHint:
     def test_hint_reaches_both_prompts(

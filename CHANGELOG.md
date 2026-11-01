@@ -22,10 +22,11 @@ No version has been released yet; everything below is under **Unreleased**.
   convention and style rules and uses the LLM only to check the message against the diff.
 - **LLM providers**: OpenAI, Anthropic, Gemini and Ollama behind one protocol, as optional extras
   (`openai`, `anthropic`, `gemini`, `ollama`, `all`), plus a deterministic `FakeLLM` for tests.
-- **`generate` command** with `--provider`, `--model`, `--dry-run`, `--yes`, `--max-iterations`,
-  `--hint`, `--amend`, `--no-verify` and `--verbose`; the message goes to stdout and diagnostics to
-  stderr. Handles nothing staged, empty repositories, binary-only diffs and very large diffs
-  (budgeted per file, with a notice).
+- **`generate` command** with `--provider`, `--model`, `--dry-run`, `--yes`, `--accept-partial`,
+  `--max-iterations`, `--hint`, `--amend`, `--no-verify` and `--verbose`; the message goes to stdout
+  and diagnostics to stderr. `--yes` refuses to commit a draft left unfinished by a provider error
+  unless `--accept-partial` is given. Handles nothing staged, empty repositories, binary-only diffs
+  and very large diffs (budgeted per file, with a notice).
 - **`git ai-commit`** via a `git-ai-commit` console script, which also offers `config` and `hook`.
 - **Resilience**: rate limits and transient provider errors (timeouts, dropped connections, 5xx)
   are retried with bounded exponential backoff (`GITCOMMIT_AI_MAX_RETRIES`,

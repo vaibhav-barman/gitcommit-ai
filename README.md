@@ -304,7 +304,8 @@ uv run gitcommit-ai generate --provider anthropic --model claude-sonnet-5-5 --ve
 | `--provider` | `openai`, `anthropic`, `gemini`, or `ollama` |
 | `--model`, `-m` | Model name (default: the provider's default) |
 | `--dry-run` | Print the message and exit without committing |
-| `--yes`, `-y` | Commit without the confirmation prompt |
+| `--yes`, `-y` | Commit without the confirmation prompt (refused if a provider error cut the run short) |
+| `--accept-partial` | Let `--yes` commit a draft left unfinished by a provider error |
 | `--max-iterations` | Cap on generate/critique rounds (1–10) |
 | `--hint "text"` | What the change is for, in your own words (up to 1000 characters) |
 | `--amend` | Replace the last commit; the message covers it plus any staged changes |
@@ -344,7 +345,7 @@ feat(api): add orders endpoint
 - **Staleness guard**: if the staged changes (or `HEAD`) differ from what the message was written for, nothing is committed (exit code 1).
 - **Merge, cherry-pick, revert in progress**: refused, because Git already prepared the message; finish with `git commit`. A **rebase** in progress proceeds with a note. On a **detached `HEAD`** you are warned before committing.
 - **Hooks** run as usual when committing; `--no-verify` skips pre-commit and commit-msg.
-- **`--yes` commits whatever is shown**, including a best draft the critic did not fully approve; read the warning first.
+- **`--yes` and interrupted runs**: if a provider error stopped the run early, `--yes` prints the draft, then exits with code 1 and commits nothing. Pass `--accept-partial` to allow it. A draft the critic merely did not approve after `max_iterations` rounds is still committed by `--yes`; the warning is on stderr.
 
 ### 7. Show the Effective Settings
 ```bash

@@ -41,6 +41,11 @@ def generate(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the message without committing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Commit without asking for confirmation."),
+    accept_partial: bool = typer.Option(
+        False,
+        "--accept-partial",
+        help="Let --yes commit a draft left unfinished by a provider error.",
+    ),
     amend: bool = typer.Option(
         False,
         "--amend",
@@ -71,6 +76,9 @@ def generate(
     Unless --dry-run is given, you are asked to confirm before committing.
     With --amend the last commit is replaced. Its own message is not used as
     an example, and the message is written for the combined change.
+
+    If a provider error cut the run short, --yes refuses to commit the unfinished
+    draft (exit code 1) unless --accept-partial is also given.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -119,6 +127,12 @@ def generate(
             _note(
                 "HEAD is detached: the new commit will not belong to any branch.",
                 color=typer.colors.YELLOW,
+            )
+        if yes and result.interruption and not accept_partial:
+            _fail(
+                f"Not committing: the run stopped early ({result.interruption}). "
+                "Rerun, review the draft above and commit it yourself, "
+                "or pass --accept-partial to let --yes commit it."
             )
         if not yes:
             typer.confirm("Commit with this message?", abort=True, err=True)
