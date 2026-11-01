@@ -40,3 +40,23 @@ def parse_retry_after(headers: Mapping[str, str] | None) -> float | None:
         return float(raw)
     except ValueError:
         return None
+
+
+def dig(data: object, *path: str | int) -> object:
+    """Follow keys and list indexes into decoded JSON; ``None`` if any step is missing."""
+    current = data
+    for step in path:
+        if isinstance(step, int):
+            if not isinstance(current, list) or not -len(current) <= step < len(current):
+                return None
+            current = current[step]
+        elif isinstance(current, dict):
+            current = current.get(step)
+        else:
+            return None
+    return current
+
+
+def text_or_none(value: object) -> str | None:
+    """``value`` if it is a string, else ``None``."""
+    return value if isinstance(value, str) else None

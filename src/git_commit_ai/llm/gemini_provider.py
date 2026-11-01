@@ -1,26 +1,31 @@
-"""Google Gemini backend."""
+"""Google Gemini API backend (``generateContent``)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
-import httpx
-from google import genai
-from google.genai import errors, types
-
-from git_commit_ai.core.exceptions import LLMError, RateLimitError, TransientLLMError
-from git_commit_ai.llm._common import require_text, split_system
+from git_commit_ai.llm._common import dig, require_text, split_system
+from git_commit_ai.llm.base import Role
+from git_commit_ai.llm.http import HttpClient
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import httpx
+
     from git_commit_ai.llm.base import LLMMessage
 
-_RATE_LIMITED = 429
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def gemini_headers(api_key: str) -> dict[str, str]:
+    """Auth header for the Gemini API; the key never goes in a URL."""
+    return {"x-goog-api-key": api_key}
 
 
 class GeminiProvider:
-    """``LLMProvider`` backed by the Gemini API."""
+    """``LLMProvider`` backed by ``POST /v1beta/models/{model}:generateContent``."""
 
     name = "gemini"
 
@@ -30,13 +35,17 @@ class GeminiProvider:
         api_key: str,
         temperature: float,
         timeout: float,
-        client: genai.Client | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._model = model
+        self._model = model.removeprefix("models/")
         self._temperature = temperature
-        self._client = client or genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(timeout=int(timeout * 1000)),
+        self._http = HttpClient(
+            self.name,
+            GEMINI_BASE_URL,
+            gemini_headers(api_key),
+            timeout,
+            transport,
+            secrets=(api_key,),
         )
 
     @property
@@ -47,29 +56,26 @@ class GeminiProvider:
     def complete(self, messages: Sequence[LLMMessage]) -> str:
         """Return the assistant reply for the conversation."""
         system, turns = split_system(messages)
-        contents = [
-            types.Content(
-                role="model" if m.role.value == "assistant" else "user",
-                parts=[types.Part(text=m.content)],
-            )
-            for m in turns
-        ]
-        config = types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=self._temperature,
+        body: dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "model" if m.role is Role.ASSISTANT else "user",
+                    "parts": [{"text": m.content}],
+                }
+                for m in turns
+            ],
+            "generationConfig": {"temperature": self._temperature},
+        }
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        path = f"/models/{quote(self._model, safe='')}:generateContent"
+        response = self._http.post_json(path, body, model=self._model)
+        parts = dig(response, "candidates", 0, "content", "parts")
+        text = "".join(
+            part["text"]
+            for part in (parts if isinstance(parts, list) else [])
+            if isinstance(part, dict)
+            and isinstance(part.get("text"), str)
+            and not part.get("thought")
         )
-        try:
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=contents,
-                config=config,
-            )
-        except httpx.TransportError as exc:
-            raise TransientLLMError(self.name, str(exc) or type(exc).__name__) from exc
-        except errors.APIError as exc:
-            if exc.code == _RATE_LIMITED:
-                raise RateLimitError(self.name) from exc
-            if isinstance(exc, errors.ServerError):
-                raise TransientLLMError(self.name, f"HTTP {exc.code}") from exc
-            raise LLMError(f"Gemini request failed ({exc.code}): {exc.message}") from exc
-        return require_text(self.name, response.text)
+        return require_text(self.name, text)

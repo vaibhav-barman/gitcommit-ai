@@ -1,32 +1,24 @@
-"""Ollama local-server backend."""
+"""Ollama backend (``POST /api/chat``) for a local or remote server."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import httpx
-import ollama
-from ollama import Client
-
-from git_commit_ai.core.exceptions import (
-    LLMError,
-    OllamaUnreachableError,
-    RateLimitError,
-    TransientLLMError,
-)
-from git_commit_ai.llm._common import require_text
+from git_commit_ai.core.exceptions import OllamaUnreachableError
+from git_commit_ai.llm._common import dig, require_text, text_or_none
+from git_commit_ai.llm.http import HttpClient
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from git_commit_ai.llm.base import LLMMessage
+    import httpx
 
-_RATE_LIMITED = 429
-_SERVER_ERROR = 500
+    from git_commit_ai.llm.base import LLMMessage
 
 
 class OllamaProvider:
-    """``LLMProvider`` backed by a local or remote Ollama server."""
+    """``LLMProvider`` backed by an Ollama server. A refused connection is reported as
+    ``OllamaUnreachableError`` (not retried); timeouts and 5xx are transient."""
 
     name = "ollama"
 
@@ -36,12 +28,18 @@ class OllamaProvider:
         base_url: str,
         temperature: float,
         timeout: float,
-        client: Client | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._model = model
-        self._base_url = base_url
         self._temperature = temperature
-        self._client = client or Client(host=base_url, timeout=timeout)
+        self._http = HttpClient(
+            self.name,
+            base_url,
+            {},
+            timeout,
+            transport,
+            unreachable=lambda: OllamaUnreachableError(base_url),
+        )
 
     @property
     def model(self) -> str:
@@ -50,20 +48,11 @@ class OllamaProvider:
 
     def complete(self, messages: Sequence[LLMMessage]) -> str:
         """Return the assistant reply for the conversation."""
-        try:
-            response = self._client.chat(
-                model=self._model,
-                messages=[{"role": m.role.value, "content": m.content} for m in messages],
-                options={"temperature": self._temperature},
-            )
-        except ConnectionError as exc:
-            raise OllamaUnreachableError(self._base_url) from exc
-        except httpx.TimeoutException as exc:
-            raise TransientLLMError(self.name, "request timed out") from exc
-        except ollama.ResponseError as exc:
-            if exc.status_code == _RATE_LIMITED:
-                raise RateLimitError(self.name) from exc
-            if exc.status_code >= _SERVER_ERROR:
-                raise TransientLLMError(self.name, f"HTTP {exc.status_code}") from exc
-            raise LLMError(f"Ollama request failed ({exc.status_code}): {exc.error}") from exc
-        return require_text(self.name, response.message.content)
+        body = {
+            "model": self._model,
+            "messages": [{"role": m.role.value, "content": m.content} for m in messages],
+            "stream": False,
+            "options": {"temperature": self._temperature},
+        }
+        response = self._http.post_json("/api/chat", body, model=self._model)
+        return require_text(self.name, text_or_none(dig(response, "message", "content")))

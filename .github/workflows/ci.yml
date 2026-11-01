@@ -37,7 +37,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      # All extras: the backend tests import every provider SDK (all mocked, no network).
+      # All extras: the only non-empty one is keyring, whose store has tests.
       - run: uv sync --all-extras --python ${{ matrix.python-version }}
       - run: uv run mypy src tests scripts
       - run: uv run pytest

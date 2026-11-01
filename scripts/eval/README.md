@@ -26,7 +26,7 @@ recorded with its error and left out of the percentages. It never stops the run.
 ## Running it
 
 Run from the repository root of GitCommit AI, with the project environment active
-(`uv sync --all-extras`):
+(`uv sync`):
 
 ```bash
 # Offline: no network, no API key. Safe to try anywhere.

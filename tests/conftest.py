@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
@@ -23,6 +24,16 @@ _ISOLATED_VARIABLES = (
     "OLLAMA_API_KEY",
     "CI",
 )
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any test that would send a real HTTP request. Tests pass a fake transport."""
+
+    def refuse(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"network access in a test: {request.method} {request.url}")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
 
 
 @pytest.fixture(autouse=True)

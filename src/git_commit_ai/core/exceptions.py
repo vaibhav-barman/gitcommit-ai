@@ -78,17 +78,42 @@ class MissingAPIKeyError(LLMError):
         self.env_var = env_var
 
 
-class ProviderNotInstalledError(LLMError):
-    """Raised when the SDK for a selected provider is not installed."""
+class AuthenticationError(LLMError):
+    """Raised when a provider rejects the API key (or the key lacks a permission).
 
-    def __init__(self, provider: str, extra: str) -> None:
+    The message is fixed text: provider error bodies can echo the key back.
+    """
+
+    def __init__(self, provider: str, status: int | None = None) -> None:
+        detail = f" (HTTP {status})" if status is not None else ""
+        super().__init__(f"{provider} rejected the API key{detail}.")
+        self.provider = provider
+        self.status = status
+
+
+class ModelNotAvailableError(LLMError):
+    """Raised when the provider does not serve the requested model."""
+
+    def __init__(self, provider: str, model: str) -> None:
         super().__init__(
-            f"The '{provider}' provider needs its SDK. "
-            f"Install it with: pip install 'gitcommit-ai[{extra}]' "
-            f"(installed with pipx? use: pipx install --force 'gitcommit-ai[{extra}]')"
+            f"{model} isn't available from {provider} (it may have been retired or renamed)."
         )
         self.provider = provider
-        self.extra = extra
+        self.model = model
+
+
+class RequestRejectedError(LLMError):
+    """Raised when a provider refuses a request for a reason other than auth or the model.
+
+    ``param`` is the request field the provider blamed, when it names one.
+    """
+
+    def __init__(self, provider: str, status: int, message: str, param: str | None) -> None:
+        detail = f": {message}" if message else ""
+        super().__init__(f"{provider} request failed (HTTP {status}){detail}")
+        self.provider = provider
+        self.status = status
+        self.param = param
 
 
 class OllamaUnreachableError(LLMError):

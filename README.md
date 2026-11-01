@@ -81,12 +81,12 @@ Diagnostics go to stderr and the message goes to stdout, so `git ai-commit --dry
 
 ## Quick start
 
-**1. Install.** The package is not on PyPI yet, so install from a clone. Pick the provider extra you need (`openai`, `anthropic`, `gemini`, `ollama`, or `all`).
+**1. Install.** The package is not on PyPI yet, so install from a clone. Every provider works out of the box; there is nothing extra to install.
 
 ```bash
 git clone https://github.com/vaibhav-barman/gitcommit-ai.git
 cd gitcommit-ai
-pipx install ".[openai]"
+pipx install .
 ```
 
 **2. Set a provider key.** Ollama needs none.
@@ -293,7 +293,7 @@ API keys
 |---|---|
 | `Nothing is staged. Stage your changes first` | Run `git add` first; GitCommit AI never stages for you |
 | `No API key for provider 'openai'. Set the OPENAI_API_KEY environment variable.` | Export the key, or put it in a `.env` in the current directory or repository root. `git-ai-commit config` shows what was found and where |
-| `The 'openai' provider needs its SDK.` | Install the extra: `pipx install --force ".[openai]"` from your clone (or `pip install 'gitcommit-ai[openai]'` in a virtual environment) |
+| `openai rejected the API key (HTTP 401).` | The key is wrong, revoked, or lacks permission. Replace it; `git-ai-commit config` shows which key was used and where it came from |
 | `Could not reach Ollama at http://localhost:11434.` | Start it with `ollama serve`, or set `GITCOMMIT_AI_OLLAMA_URL` |
 | Yellow `Stopped early: ...` | A provider error cut the run short. The best draft is shown. Rerun, or commit it yourself; `--yes` needs `--accept-partial` |
 | `The staged changes changed while the message was being generated` | You staged or committed during generation. Nothing was committed; run it again |
@@ -315,7 +315,7 @@ gitcommit-ai/
 │   ├── core/       config, settings (flags > env > .env > config file), saved config and keys, schemas, exceptions
 │   ├── git/        repository, diff, history, snapshots, committer, hook installer
 │   ├── context/    normalizer, convention detector, style analyzer, example selector, engine
-│   ├── llm/        provider protocol, factory, retry, FakeLLM, four backends
+│   ├── llm/        provider protocol, HTTP layer, factory, retry, FakeLLM, backends
 │   ├── agents/     state, analyst, retrieval, generator, critic rules and node, graph
 │   └── cli/        main app, generate, config, hook, git subcommand entry point
 ├── scripts/
@@ -349,14 +349,14 @@ uv run python -m scripts.eval /path/to/repo --provider anthropic -n 30      # a 
 ## Development
 
 ```bash
-uv sync --all-extras          # every provider SDK; the backend tests import them
+uv sync                       # no provider SDKs: every provider is plain HTTP
 uv run pytest                 # no network, no API keys
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests scripts # strict
 uv run python -m scripts.check_docs   # every flag, variable, path and link in the docs vs the code
 ```
 
-Tests run in temporary Git repositories and drive the agents with `FakeLLM` and mocked SDK clients. CI runs Ruff, mypy and the tests on Python 3.11, 3.12 and 3.13, plus a packaging smoke test. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md).
+Tests run in temporary Git repositories and drive the agents with `FakeLLM`; provider backends run against a fake HTTP transport, and any real network request fails the test. CI runs Ruff, mypy and the tests on Python 3.11, 3.12 and 3.13, plus a packaging smoke test. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## Roadmap
 

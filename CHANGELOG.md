@@ -9,6 +9,21 @@ No version has been released yet; everything below is under **Unreleased**.
 
 ## [Unreleased]
 
+### Changed
+
+- **No provider SDKs.** Every provider is called over plain HTTP with `httpx`, so `pipx install .`
+  works for every provider with nothing else to install. The `openai`, `anthropic`, `gemini`,
+  `ollama` and `all` extras still exist but install nothing; they will be removed in the release
+  after next. Provider errors are mapped in one place: a rejected key, a retired model and a
+  provider's own error message (with keys redacted) are now reported distinctly.
+- Settings can be saved in `config.toml` and keys in `credentials.toml` (mode 0600) in the per-user
+  config directory (`GITCOMMIT_AI_CONFIG_DIR`). Both rank below the environment and `.env`, so
+  setups configured through variables behave exactly as before.
+
+### Removed
+
+- `ProviderNotInstalledError`: there are no optional SDKs left to be missing.
+
 ### Added
 
 - **Git intelligence layer**: repository inspection, staged/unstaged/amend diff extraction with

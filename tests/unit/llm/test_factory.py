@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING
 
 import pytest
 
 from git_commit_ai.core.config import GitCommitAIConfig, ProviderName
-from git_commit_ai.core.exceptions import MissingAPIKeyError, ProviderNotInstalledError
-from git_commit_ai.llm import create_provider
+from git_commit_ai.core.exceptions import MissingAPIKeyError
+from git_commit_ai.llm import LLMMessage, Role, create_provider
+from tests.fixtures.http import FakeHttp, json_response
 
 if TYPE_CHECKING:
-    from pytest import MonkeyPatch
+    pass
 
 
 @pytest.mark.parametrize(
@@ -56,16 +56,34 @@ def test_ollama_needs_no_key() -> None:
     assert llm.model == "llama3.1"
 
 
-def test_missing_sdk_raises_install_hint(monkeypatch: MonkeyPatch) -> None:
-    def fail(name: str) -> None:
-        raise ImportError(name)
-
-    monkeypatch.setattr(importlib, "import_module", fail)
-    config = GitCommitAIConfig(llm_provider=ProviderName.GEMINI)
-    with pytest.raises(ProviderNotInstalledError, match=r"gitcommit-ai\[gemini\]"):
-        create_provider(config, api_key="k")
-
-
 def test_an_empty_key_counts_as_missing() -> None:
     with pytest.raises(MissingAPIKeyError):
         create_provider(GitCommitAIConfig(llm_provider=ProviderName.ANTHROPIC), api_key="")
+
+
+@pytest.mark.parametrize(
+    ("provider", "url"),
+    [
+        (ProviderName.OPENAI, "https://api.openai.com/v1/chat/completions"),
+        (ProviderName.ANTHROPIC, "https://api.anthropic.com/v1/messages"),
+        (
+            ProviderName.GEMINI,
+            "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent",
+        ),
+        (ProviderName.OLLAMA, "http://ollama.test:1/api/chat"),
+    ],
+)
+def test_requests_go_through_the_given_transport(provider: ProviderName, url: str) -> None:
+    replies = {
+        ProviderName.OPENAI: {"choices": [{"message": {"content": "ok"}}]},
+        ProviderName.ANTHROPIC: {"content": [{"type": "text", "text": "ok"}]},
+        ProviderName.GEMINI: {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+        ProviderName.OLLAMA: {"message": {"content": "ok"}},
+    }
+    http = FakeHttp().on("POST", url, json_response(200, replies[provider]))
+    config = GitCommitAIConfig(
+        llm_provider=provider, llm_model="m", ollama_base_url="http://ollama.test:1"
+    )
+    llm = create_provider(config, api_key="k", transport=http.transport)
+    assert llm.complete([LLMMessage(role=Role.USER, content="hi")]) == "ok"
+    assert len(http.calls) == 1

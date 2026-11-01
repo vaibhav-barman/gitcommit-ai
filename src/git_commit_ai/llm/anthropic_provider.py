@@ -1,25 +1,32 @@
-"""Anthropic messages backend."""
+"""Anthropic Messages API backend."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-import anthropic
-from anthropic import Anthropic
-
-from git_commit_ai.core.exceptions import LLMError, RateLimitError, TransientLLMError
-from git_commit_ai.llm._common import parse_retry_after, require_text, split_system
+from git_commit_ai.llm._common import dig, require_text, split_system
+from git_commit_ai.llm.base import Role
+from git_commit_ai.llm.http import HttpClient
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import httpx
+
     from git_commit_ai.llm.base import LLMMessage
 
+ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
 _MAX_OUTPUT_TOKENS = 1024
 
 
+def anthropic_headers(api_key: str) -> dict[str, str]:
+    """Auth headers for the Anthropic API."""
+    return {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
+
+
 class AnthropicProvider:
-    """``LLMProvider`` backed by the Anthropic API."""
+    """``LLMProvider`` backed by ``POST /v1/messages``."""
 
     name = "anthropic"
 
@@ -29,11 +36,18 @@ class AnthropicProvider:
         api_key: str,
         temperature: float,
         timeout: float,
-        client: Anthropic | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._model = model
         self._temperature = temperature
-        self._client = client or Anthropic(api_key=api_key, timeout=timeout)
+        self._http = HttpClient(
+            self.name,
+            ANTHROPIC_BASE_URL,
+            anthropic_headers(api_key),
+            timeout,
+            transport,
+            secrets=(api_key,),
+        )
 
     @property
     def model(self) -> str:
@@ -43,23 +57,24 @@ class AnthropicProvider:
     def complete(self, messages: Sequence[LLMMessage]) -> str:
         """Return the assistant reply for the conversation."""
         system, turns = split_system(messages)
-        turn_params: list[anthropic.types.MessageParam] = [
-            {"role": "assistant" if m.role.value == "assistant" else "user", "content": m.content}
-            for m in turns
-        ]
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=_MAX_OUTPUT_TOKENS,
-                temperature=self._temperature,
-                system=system or anthropic.omit,
-                messages=turn_params,
-            )
-        except anthropic.RateLimitError as exc:
-            raise RateLimitError(self.name, parse_retry_after(exc.response.headers)) from exc
-        except anthropic.AuthenticationError as exc:
-            raise LLMError("Anthropic rejected the API key") from exc
-        except (anthropic.APIConnectionError, anthropic.InternalServerError) as exc:
-            raise TransientLLMError(self.name, str(exc)) from exc
-        text = "".join(block.text for block in response.content if block.type == "text")
+        body: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": _MAX_OUTPUT_TOKENS,
+            "temperature": self._temperature,
+            "messages": [
+                {"role": "assistant" if m.role is Role.ASSISTANT else "user", "content": m.content}
+                for m in turns
+            ],
+        }
+        if system:
+            body["system"] = system
+        response = self._http.post_json("/messages", body, model=self._model)
+        blocks = dig(response, "content")
+        text = "".join(
+            block["text"]
+            for block in (blocks if isinstance(blocks, list) else [])
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        )
         return require_text(self.name, text)
