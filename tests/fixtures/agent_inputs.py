@@ -11,10 +11,10 @@ from tests.fixtures.diffs import make_diff
 SCOPED_HISTORY = [
     "feat(api): add pagination",
     "fix(api): handle empty page",
-    "docs(readme): describe setup",
+    "docs(readme): update setup guide",
     "feat(cli): add verbose flag",
-    "fix(cli): exit non-zero on error",
-    "test(api): cover pagination",
+    "fix(cli): handle error exit",
+    "test(api): add pagination tests",
 ]
 GITMOJI_HISTORY = [
     "✨ add pagination",
@@ -59,6 +59,7 @@ def make_state(
     files: dict[str, int] | None = None,
     analysis: DiffAnalysis | None = None,
     max_diff_chars: int = 10_000,
+    with_bodies: bool = False,
 ) -> AgentState:
     """Build a state that has passed the analyst and context nodes.
 
@@ -67,10 +68,15 @@ def make_state(
         files: Added files and line counts for the staged diff.
         analysis: Analyst output; a default is used if omitted.
         max_diff_chars: Budget for the diff digest.
+        with_bodies: Give every historical commit a body.
     """
     diff = make_diff(files or {"src/api/client.py": 6})
     history = [
-        HistoricalCommit(hash=f"{i:040d}", subject=subject)
+        HistoricalCommit(
+            hash=f"{i:040d}",
+            subject=subject,
+            body="Explains why the change was needed." if with_bodies else "",
+        )
         for i, subject in enumerate(subjects or [])
     ]
     state = AgentState(
