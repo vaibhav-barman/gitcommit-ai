@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from git_commit_ai.agents.conventions import HARD_SUBJECT_LIMIT, effective_convention
+from git_commit_ai.agents.conventions import (
+    BODY_WIDTH,
+    HARD_SUBJECT_LIMIT,
+    MAX_BODY_LINES,
+    body_expected,
+    effective_convention,
+)
+from git_commit_ai.agents.message_format import split_message
 from git_commit_ai.agents.state import CommitType, Severity, Violation
 from git_commit_ai.context.normalizer import CommitNormalizer
 from git_commit_ai.context.style_analyzer import COMMON_IMPERATIVE_VERBS
@@ -12,12 +19,15 @@ from git_commit_ai.core.schemas import CommitConvention, HistoricalCommit
 
 if TYPE_CHECKING:
     from git_commit_ai.agents.state import DiffAnalysis
-    from git_commit_ai.core.schemas import CommitStyleProfile, NormalizedCommit, RepositoryContext
+    from git_commit_ai.core.schemas import (
+        CommitStyleProfile,
+        DiffResult,
+        NormalizedCommit,
+        RepositoryContext,
+    )
 
 _TYPED = {CommitConvention.CONVENTIONAL, CommitConvention.SCOPED_CONVENTIONAL}
 _IMPERATIVE_ENFORCED_AT = 0.5
-_BODY_ALWAYS = 0.8
-_BODY_NEVER = 0.1
 _LENGTH_SLACK = 1.5
 _LENGTH_FLOOR = 50
 _KNOWN_TYPES = {t.value for t in CommitType}
@@ -29,6 +39,7 @@ def check_draft(
     message: str,
     analysis: DiffAnalysis,
     context: RepositoryContext,
+    diff_result: DiffResult,
 ) -> list[Violation]:
     """Return every rule violation found in ``message``.
 
@@ -40,8 +51,7 @@ def check_draft(
         return [Violation(rule="empty-message", message="The commit message is empty.")]
 
     lines = text.splitlines()
-    subject = lines[0]
-    body = "\n".join(lines[1:]).strip()
+    subject, body = split_message(text)
     parsed = _normalizer.normalize(HistoricalCommit(hash="draft", subject=subject, body=body))
     convention = effective_convention(context)
     profile = context.style_profile
@@ -55,9 +65,9 @@ def check_draft(
         _trailing_period(parsed, profile),
         _scope(parsed, convention, profile),
         _breaking(parsed, convention, analysis),
-        _body(body, parsed, profile),
         _blank_line(lines),
     ]
+    found.extend(_body(body, parsed, body_expected(context, diff_result)))
     return [v for v in found if v is not None]
 
 
@@ -243,19 +253,48 @@ def _breaking(
     return None
 
 
-def _body(
-    body: str,
-    parsed: NormalizedCommit,
-    profile: CommitStyleProfile,
-) -> Violation | None:
-    if not body and profile.body_usage_frequency >= _BODY_ALWAYS:
-        return _warning("body", "Most commits here have a body; explain why the change was made.")
-    if body and not parsed.is_breaking and profile.body_usage_frequency <= _BODY_NEVER:
-        return _warning("body", "Commits here are subject-only; consider dropping the body.")
-    return None
+def _body(body: str, parsed: NormalizedCommit, expected: bool) -> list[Violation]:
+    if not body:
+        if expected:
+            return [
+                _error(
+                    "body-missing",
+                    "Add a short body after a blank line explaining what changed and why; "
+                    "this repository's commits (or this large diff) call for one.",
+                )
+            ]
+        return []
+
+    found: list[Violation] = []
+    if not expected and not parsed.is_breaking:
+        found.append(
+            _warning("body-unexpected", "A subject line alone is enough here; drop the body.")
+        )
+    if wrapped := _overlong_lines(body):
+        found.append(
+            _error(
+                "body-wrap",
+                f"Wrap the body at {BODY_WIDTH} columns; {len(wrapped)} line(s) are longer.",
+            )
+        )
+    non_blank = sum(1 for line in body.splitlines() if line.strip())
+    if non_blank > MAX_BODY_LINES:
+        found.append(
+            _warning("body-length", f"The body is {non_blank} lines; keep it to {MAX_BODY_LINES}.")
+        )
+    return found
+
+
+def _overlong_lines(body: str) -> list[str]:
+    """Body lines over the width, ignoring code blocks and single unbreakable tokens."""
+    return [
+        line
+        for line in body.splitlines()
+        if len(line) > BODY_WIDTH and not line.startswith(("    ", "\t")) and len(line.split()) > 1
+    ]
 
 
 def _blank_line(lines: list[str]) -> Violation | None:
     if len(lines) > 1 and lines[1].strip():
-        return _warning("blank-line", "Separate the subject from the body with a blank line.")
+        return _error("blank-line", "Separate the subject from the body with a blank line.")
     return None

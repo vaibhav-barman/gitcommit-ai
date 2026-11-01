@@ -26,6 +26,12 @@ Judge the dominant change. Ignore formatting-only noise and lockfile churn when
 real changes exist. Do not invent changes that are not in the diff."""
 
 
+def _user_prompt(digest: str, hint: str | None) -> str:
+    if not hint:
+        return digest
+    return f"The author says this change is for: {hint}\n\n{digest}"
+
+
 def make_diff_analyst(
     llm: LLMProvider,
     max_diff_chars: int,
@@ -42,7 +48,7 @@ def make_diff_analyst(
             llm,
             [
                 LLMMessage(role=Role.SYSTEM, content=_SYSTEM_PROMPT),
-                LLMMessage(role=Role.USER, content=digest.text),
+                LLMMessage(role=Role.USER, content=_user_prompt(digest.text, state.hint)),
             ],
             DiffAnalysis,
         )

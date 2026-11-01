@@ -49,3 +49,17 @@ def test_unknown_change_type_is_rejected_after_retry() -> None:
     state = AgentState(diff_result=make_diff({"a.py": 1}))
     with pytest.raises(LLMResponseError):
         make_diff_analyst(llm, max_diff_chars=10_000)(state)
+
+
+def test_hint_reaches_the_analyst_prompt() -> None:
+    llm = FakeLLM([REPLY])
+    state = AgentState(diff_result=make_diff({"a.py": 1}), hint="speed up cold starts")
+    make_diff_analyst(llm, max_diff_chars=10_000)(state)
+    assert "speed up cold starts" in llm.calls[0][1].content
+
+
+def test_prompt_is_just_the_digest_without_a_hint() -> None:
+    llm = FakeLLM([REPLY])
+    state = AgentState(diff_result=make_diff({"a.py": 1}))
+    make_diff_analyst(llm, max_diff_chars=10_000)(state)
+    assert llm.calls[0][1].content.startswith("Changed files:")

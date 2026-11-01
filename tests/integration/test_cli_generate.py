@@ -166,6 +166,86 @@ class TestDegradation:
         assert "Retrying in 2s (1/3)" in result.stderr
 
 
+class TestHint:
+    def test_hint_reaches_both_prompts(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm([GOOD])
+        use_llm(monkeypatch, llm)
+
+        result = _generate(staged_repo, "--dry-run", "--hint", "orders power the new checkout")
+
+        assert result.exit_code == 0
+        analyst_prompt, generator_prompt = llm.calls[0][1].content, llm.calls[1][1].content
+        assert "orders power the new checkout" in analyst_prompt
+        assert "orders power the new checkout" in generator_prompt
+
+    def test_overlong_hint_is_rejected(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = scripted_llm([GOOD])
+        use_llm(monkeypatch, llm)
+
+        result = _generate(staged_repo, "--dry-run", "--hint", "x" * 1_001)
+
+        assert result.exit_code == 1
+        assert "--hint is 1001 characters" in result.stderr
+        assert llm.calls == []
+
+
+class TestBody:
+    LONG_BODY = (
+        "This change lets callers bound the size of each response so that slow "
+        "connections do not stall while a very large page is transferred."
+    )
+
+    def test_body_is_generated_wrapped_and_committed_where_bodies_are_common(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = scoped_history_repo(tmp_path / "repo", with_bodies=True)
+        stage_file(repo, "src/api/orders.py", "def orders(): ...\n")
+        draft = f"{GOOD}\n\n{self.LONG_BODY}"
+        llm = scripted_llm([draft])
+        use_llm(monkeypatch, llm)
+
+        result = _generate(repo, "--yes")
+
+        assert result.exit_code == 0
+        assert "Add a short body after a blank line" in llm.calls[1][1].content
+        lines = head_message(repo).splitlines()
+        assert lines[0] == GOOD
+        assert lines[1] == ""
+        assert len(lines) > 3
+        assert all(len(line) <= 72 for line in lines)
+
+    def test_missing_body_is_requested_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = scoped_history_repo(tmp_path / "repo", with_bodies=True)
+        stage_file(repo, "src/api/orders.py", "def orders(): ...\n")
+        use_llm(monkeypatch, scripted_llm([GOOD, f"{GOOD}\n\nBecause orders matter."]))
+
+        result = _generate(repo, "--dry-run", "--verbose")
+
+        assert result.exit_code == 0
+        assert "[error] body-missing" in result.stderr
+        assert result.stdout.strip().endswith("Because orders matter.")
+
+    def test_large_diff_gets_a_body_even_in_a_subject_only_repo(
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for n in range(6):
+            stage_file(staged_repo, f"src/api/extra{n}.py", f"x = {n}\n")
+        llm = scripted_llm([f"{GOOD}\n\nAdds several modules.", GOOD])
+        use_llm(monkeypatch, llm)
+
+        result = _generate(staged_repo, "--dry-run")
+
+        assert result.exit_code == 0
+        assert "Add a short body after a blank line" in llm.calls[1][1].content
+        assert result.stdout.strip() == f"{GOOD}\n\nAdds several modules."
+
+
 class TestCommitting:
     def test_yes_commits_without_prompting(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch

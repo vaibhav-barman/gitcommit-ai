@@ -130,8 +130,16 @@ class CommitMessageGraph:
         self._config = config or GitCommitAIConfig()
         self._graph = build_graph(llm, self._config, engine)
 
-    def run(self, diff_result: DiffResult, history: list[HistoricalCommit]) -> GenerationResult:
+    def run(
+        self,
+        diff_result: DiffResult,
+        history: list[HistoricalCommit],
+        hint: str | None = None,
+    ) -> GenerationResult:
         """Generate a commit message for ``diff_result``.
+
+        ``hint`` is the author's own statement of intent; it steers the analyst
+        and the generator, but the message must still match the diff.
 
         If no draft is approved within the cap, the best draft is returned
         with ``approved=False`` rather than failing. A provider error after the
@@ -140,7 +148,7 @@ class CommitMessageGraph:
         """
         steps = _STEPS_BEFORE_LOOP + _STEPS_PER_ROUND * self._config.max_iterations
         raw = self._graph.invoke(
-            AgentState(diff_result=diff_result, history=history),
+            AgentState(diff_result=diff_result, history=history, hint=hint),
             {"recursion_limit": steps + _RECURSION_HEADROOM},
         )
         final = AgentState.model_validate(raw)

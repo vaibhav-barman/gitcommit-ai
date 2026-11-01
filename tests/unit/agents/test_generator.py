@@ -30,8 +30,7 @@ from tests.fixtures.agent_inputs import (
 
 
 def _user_prompt(state: AgentState) -> str:
-    digest, analysis, context = state.drafting_inputs()
-    messages = build_generator_messages(digest, analysis, context, state.drafts)
+    messages = build_generator_messages(state)
     assert messages[0].role is Role.SYSTEM
     return messages[1].content
 
@@ -196,3 +195,47 @@ def test_later_round_provider_failure_is_recorded_not_raised(error: LLMError) ->
     assert set(update) == {"interruption"}
     assert "round 2 could not be generated" in str(update["interruption"])
     assert str(error) in str(update["interruption"])
+
+
+class TestHint:
+    def test_hint_is_quoted_in_the_prompt(self) -> None:
+        state = make_state(SCOPED_HISTORY).model_copy(
+            update={"hint": "retry flaky uploads, see ticket 12"}
+        )
+        prompt = _user_prompt(state)
+        assert "retry flaky uploads, see ticket 12" in prompt
+        assert "still describe only what the diff shows" in prompt
+
+    def test_no_hint_section_without_a_hint(self) -> None:
+        assert "The author describes the intent" not in _user_prompt(make_state(SCOPED_HISTORY))
+
+
+class TestBodyInstructions:
+    def test_subject_only_in_a_subject_only_repo(self) -> None:
+        prompt = _user_prompt(make_state(SCOPED_HISTORY))
+        assert "Write a subject line only" in prompt
+
+    def test_body_requested_where_bodies_are_common(self) -> None:
+        prompt = _user_prompt(make_state(SCOPED_HISTORY, with_bodies=True))
+        assert "Add a short body after a blank line" in prompt
+        assert "under 72 characters" in prompt
+
+    def test_body_requested_for_a_large_diff_even_in_a_subject_only_repo(self) -> None:
+        files = {f"src/api/mod{i}.py": 3 for i in range(6)}
+        prompt = _user_prompt(make_state(SCOPED_HISTORY, files=files))
+        assert "Add a short body after a blank line" in prompt
+
+
+def test_generated_body_is_wrapped_and_separated() -> None:
+    reply = (
+        "feat(api): add page size option\n"
+        "This change lets callers bound the size of each response so that slow "
+        "connections do not stall while a very large page is transferred."
+    )
+    update = make_generator(FakeLLM([reply]))(make_state(SCOPED_HISTORY, with_bodies=True))
+    drafts = update["drafts"]
+    assert isinstance(drafts, list)
+    lines = drafts[0].message.splitlines()
+    assert lines[0] == "feat(api): add page size option"
+    assert lines[1] == ""
+    assert all(len(line) <= 72 for line in lines)

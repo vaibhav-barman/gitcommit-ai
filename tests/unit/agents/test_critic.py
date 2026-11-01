@@ -105,7 +105,7 @@ def test_prompt_contains_the_diff_and_the_message() -> None:
 
 def test_truncated_digest_is_disclosed_to_the_judge() -> None:
     llm = FakeLLM([FAITHFUL, FAITHFUL])
-    big = make_state(SCOPED_HISTORY, files={"src/api/big.py": 800}, max_diff_chars=1_000)
+    big = make_state(SCOPED_HISTORY, files={"src/api/big.py": 150}, max_diff_chars=1_000)
     _review(llm, _with_drafts(big, GOOD))
     _review(llm, _with_drafts(make_state(SCOPED_HISTORY), GOOD))
     assert "truncated for size" in llm.calls[0][0].content

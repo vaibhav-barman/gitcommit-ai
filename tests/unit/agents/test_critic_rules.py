@@ -20,11 +20,14 @@ def _check(
     message: str,
     history: list[str] | None = SCOPED_HISTORY,
     with_bodies: bool = False,
+    files: dict[str, int] | None = None,
     **analysis: object,
 ) -> list[Violation]:
-    state = make_state(history, analysis=make_analysis(**analysis), with_bodies=with_bodies)
+    state = make_state(
+        history, files=files, analysis=make_analysis(**analysis), with_bodies=with_bodies
+    )
     _, parsed_analysis, context = state.drafting_inputs()
-    return check_draft(message, parsed_analysis, context)
+    return check_draft(message, parsed_analysis, context, state.diff_result)
 
 
 def _rules(violations: list[Violation], severity: Severity) -> set[str]:
@@ -160,18 +163,51 @@ class TestBreakingChange:
 
 
 class TestBody:
-    def test_missing_body_warns_where_bodies_are_the_norm(self) -> None:
+    def test_missing_body_is_an_error_where_bodies_are_the_norm(self) -> None:
         violations = _check("feat(api): add page size option", with_bodies=True)
-        assert _rules(violations, Severity.WARNING) == {"body"}
+        assert _rules(violations, Severity.ERROR) == {"body-missing"}
 
-    def test_unexpected_body_warns_in_subject_only_repo(self) -> None:
+    def test_missing_body_is_an_error_for_a_large_diff(self) -> None:
+        files = {f"src/api/mod{i}.py": 3 for i in range(6)}
+        violations = _check("feat(api): add page size option", files=files)
+        assert _rules(violations, Severity.ERROR) == {"body-missing"}
+
+    def test_large_diff_by_line_count_also_expects_a_body(self) -> None:
+        violations = _check("feat(api): add page size option", files={"src/api/big.py": 250})
+        assert _rules(violations, Severity.ERROR) == {"body-missing"}
+
+    def test_subject_only_is_fine_in_a_subject_only_repo(self) -> None:
+        assert _check("feat(api): add page size option") == []
+
+    def test_unexpected_body_is_only_a_warning(self) -> None:
         violations = _check("feat(api): add page size option\n\nBecause callers asked.")
-        assert _rules(violations, Severity.WARNING) == {"body"}
+        assert _rules(violations, Severity.WARNING) == {"body-unexpected"}
+        assert _rules(violations, Severity.ERROR) == set()
 
-    def test_body_with_blank_line_is_clean(self) -> None:
+    def test_breaking_footer_is_not_an_unexpected_body(self) -> None:
+        message = "feat(api)!: add page size option\n\nBREAKING CHANGE: page size is required"
+        assert _check(message, is_breaking=True) == []
+
+    def test_well_formed_body_is_clean(self) -> None:
         message = "feat(api): add page size option\n\nBecause callers asked."
         assert _check(message, with_bodies=True) == []
 
-    def test_body_directly_under_subject_warns(self) -> None:
+    def test_overlong_body_line_is_an_error(self) -> None:
+        line = "word " * 20
+        message = f"feat(api): add page size option\n\n{line.strip()}"
+        assert _rules(_check(message, with_bodies=True), Severity.ERROR) == {"body-wrap"}
+
+    def test_unbreakable_tokens_and_code_blocks_may_exceed_the_width(self) -> None:
+        url = "https://example.com/" + "a" * 80
+        code = "x = 1; " * 20
+        message = f"feat(api): add page size option\n\n{url}\n\n    {code}"
+        assert _check(message, with_bodies=True) == []
+
+    def test_long_body_gets_a_length_warning(self) -> None:
+        body = "\n".join(f"- point number {n}" for n in range(15))
+        message = f"feat(api): add page size option\n\n{body}"
+        assert _rules(_check(message, with_bodies=True), Severity.WARNING) == {"body-length"}
+
+    def test_body_directly_under_subject_is_an_error(self) -> None:
         message = "feat(api): add page size option\nBecause callers asked."
-        assert "blank-line" in _rules(_check(message, with_bodies=True), Severity.WARNING)
+        assert "blank-line" in _rules(_check(message, with_bodies=True), Severity.ERROR)

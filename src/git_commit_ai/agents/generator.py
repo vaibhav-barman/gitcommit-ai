@@ -5,14 +5,20 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from git_commit_ai.agents.conventions import HARD_SUBJECT_LIMIT, effective_convention
+from git_commit_ai.agents.conventions import (
+    BODY_WIDTH,
+    HARD_SUBJECT_LIMIT,
+    body_expected,
+    effective_convention,
+)
+from git_commit_ai.agents.message_format import format_message
 from git_commit_ai.agents.state import AgentState, CommitType, Draft
 from git_commit_ai.core.exceptions import LLMError
 from git_commit_ai.core.schemas import CommitConvention
 from git_commit_ai.llm.base import LLMMessage, Role
 
 if TYPE_CHECKING:
-    from git_commit_ai.agents.state import AgentNode, DiffAnalysis, DiffDigest
+    from git_commit_ai.agents.state import AgentNode, DiffAnalysis
     from git_commit_ai.core.schemas import CommitStyleProfile, RepositoryContext
     from git_commit_ai.llm.base import LLMProvider
 
@@ -21,8 +27,6 @@ maintainers wrote them. Follow the format and style rules exactly. Describe only
 what the diff shows. Reply with ONLY the commit message: no quotes, no code
 fences, no commentary."""
 
-_BODY_COMMON = 0.5
-_BODY_RARE = 0.15
 _TYPED = {CommitConvention.CONVENTIONAL, CommitConvention.SCOPED_CONVENTIONAL}
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 
@@ -40,31 +44,29 @@ def make_generator(llm: LLMProvider) -> AgentNode:
     """
 
     def generator(state: AgentState) -> dict[str, object]:
-        digest, analysis, context = state.drafting_inputs()
+        state.drafting_inputs()
         try:
-            reply = llm.complete(build_generator_messages(digest, analysis, context, state.drafts))
+            reply = llm.complete(build_generator_messages(state))
         except LLMError as exc:
             if not state.drafts:
                 raise
             return {"interruption": f"round {state.iteration + 1} could not be generated: {exc}"}
         iteration = state.iteration + 1
-        draft = Draft(message=clean_message(reply), iteration=iteration)
+        draft = Draft(message=format_message(clean_message(reply)), iteration=iteration)
         return {"drafts": [*state.drafts, draft], "iteration": iteration}
 
     return generator
 
 
-def build_generator_messages(
-    digest: DiffDigest,
-    analysis: DiffAnalysis,
-    context: RepositoryContext,
-    drafts: list[Draft],
-) -> list[LLMMessage]:
+def build_generator_messages(state: AgentState) -> list[LLMMessage]:
     """Assemble the generator prompt from deterministic context.
 
     Pure so the prompt can be tested without an LLM.
     """
-    rules = "\n".join(f"- {rule}" for rule in _rules(analysis, context))
+    digest, analysis, context = state.drafting_inputs()
+    drafts = state.drafts
+    wants_body = body_expected(context, state.diff_result)
+    rules = "\n".join(f"- {rule}" for rule in _rules(analysis, context, wants_body))
     sections = [f"Format and style rules:\n{rules}"]
 
     if context.historical_examples:
@@ -73,6 +75,13 @@ def build_generator_messages(
             for example in context.historical_examples
         )
         sections.append(f"Relevant commits from this repository (match their voice):\n{shown}")
+
+    if state.hint:
+        sections.append(
+            "The author describes the intent of this change as:\n"
+            f"{state.hint}\n"
+            "Use it to choose the type and wording, but still describe only what the diff shows."
+        )
 
     sections.append(
         "What the change does:\n"
@@ -102,7 +111,7 @@ def clean_message(reply: str) -> str:
     return fenced.group(1).strip() if fenced else text
 
 
-def _rules(analysis: DiffAnalysis, context: RepositoryContext) -> list[str]:
+def _rules(analysis: DiffAnalysis, context: RepositoryContext, wants_body: bool) -> list[str]:
     convention = effective_convention(context)
     profile = context.style_profile
     rules = [_format_rule(convention, analysis, profile)]
@@ -121,7 +130,7 @@ def _rules(analysis: DiffAnalysis, context: RepositoryContext) -> list[str]:
         rules.append("End the subject with a period.")
     elif "no_trailing_period" in profile.punctuation_patterns:
         rules.append("Do not end the subject with a period.")
-    rules.append(_body_rule(profile.body_usage_frequency))
+    rules.append(_body_rule(wants_body))
     if analysis.is_breaking and convention in _TYPED:
         rules.append(
             "This change is breaking: mark it with '!' before the colon and add a "
@@ -174,9 +183,10 @@ def _capitalization_rule(capitalization: str) -> str | None:
             return None
 
 
-def _body_rule(frequency: float) -> str:
-    if frequency >= _BODY_COMMON:
-        return "Add a body after a blank line explaining why the change was made."
-    if frequency <= _BODY_RARE:
-        return "Write a subject line only; add a body just for breaking changes."
-    return "Add a body after a blank line only when the reason is not obvious."
+def _body_rule(wants_body: bool) -> str:
+    if wants_body:
+        return (
+            "Add a short body after a blank line: one to three brief paragraphs or '-' bullets "
+            f"saying what changed and why, each line under {BODY_WIDTH} characters."
+        )
+    return "Write a subject line only, with no body; add a body just for a breaking change."

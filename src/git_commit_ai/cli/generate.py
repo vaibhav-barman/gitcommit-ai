@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from git_commit_ai.core.schemas import DiffResult, RepositoryInfo
     from git_commit_ai.llm.retry import RetryEvent
 
+_MAX_HINT_CHARS = 1_000
+
 
 def generate(
     ctx: typer.Context,
@@ -36,6 +38,11 @@ def generate(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the message without committing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Commit without asking for confirmation."),
+    hint: str | None = typer.Option(
+        None,
+        "--hint",
+        help="What the change is for, in your own words; steers the type and wording.",
+    ),
     max_iterations: int | None = typer.Option(
         None,
         "--max-iterations",
@@ -54,6 +61,8 @@ def generate(
     """
     if ctx.invoked_subcommand is not None:
         return
+    if hint is not None and len(hint) > _MAX_HINT_CHARS:
+        _fail(f"--hint is {len(hint)} characters; keep it under {_MAX_HINT_CHARS}.")
     try:
         settings = load_settings(os.environ).with_flags(
             llm_provider=provider, llm_model=model, max_iterations=max_iterations
@@ -71,7 +80,7 @@ def generate(
 
         llm = create_provider(config, env=settings.environment, on_retry=_announce_retry)
         _note(f"Generating a commit message with {llm.name}/{llm.model}...")
-        result = CommitMessageGraph(llm, config).run(diff, history)
+        result = CommitMessageGraph(llm, config).run(diff, history, hint=hint)
 
         _report_input_limits(diff, result)
         if verbose:

@@ -92,6 +92,9 @@ class AgentState(BaseModel):
 
     diff_result: DiffResult
     history: list[HistoricalCommit] = Field(default_factory=list)
+    hint: str | None = Field(
+        default=None, description="The author's own statement of what the change is for"
+    )
     diff_digest: DiffDigest | None = None
     analysis: DiffAnalysis | None = None
     context: RepositoryContext | None = None

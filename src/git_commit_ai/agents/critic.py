@@ -54,7 +54,9 @@ def make_critic(llm: LLMProvider) -> AgentNode:
             raise AgentStateError("drafts")
         draft = state.drafts[-1]
 
-        critique = Critique(violations=check_draft(draft.message, analysis, context))
+        critique = Critique(
+            violations=check_draft(draft.message, analysis, context, state.diff_result)
+        )
         interruption: str | None = None
         if critique.approved:
             try:

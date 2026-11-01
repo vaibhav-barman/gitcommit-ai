@@ -100,14 +100,17 @@ def commit_count(repo_path: Path) -> int:
     return int(result.stdout.strip()) if result.returncode == 0 else 0
 
 
-def scoped_history_repo(path: Path) -> Path:
+def scoped_history_repo(path: Path, with_bodies: bool = False) -> Path:
     """Create a repository whose history uses scoped Conventional Commits."""
     repo = init_repo(path)
-    commit_file(repo, "src/api/users.py", "def users(): ...\n", "feat(api): add users endpoint")
-    commit_file(repo, "src/api/teams.py", "def teams(): ...\n", "feat(api): add teams endpoint")
-    commit_file(repo, "src/cli/main.py", "def main(): ...\n", "feat(cli): add entry point")
-    commit_file(repo, "docs/setup.md", "# Setup\n", "docs(readme): add setup guide")
-    commit_file(
-        repo, "src/api/users.py", "def users(): return []\n", "fix(api): handle empty list"
-    )
+    suffix = "\n\nExplains why the change was needed." if with_bodies else ""
+    history = [
+        ("src/api/users.py", "def users(): ...\n", "feat(api): add users endpoint"),
+        ("src/api/teams.py", "def teams(): ...\n", "feat(api): add teams endpoint"),
+        ("src/cli/main.py", "def main(): ...\n", "feat(cli): add entry point"),
+        ("docs/setup.md", "# Setup\n", "docs(readme): add setup guide"),
+        ("src/api/users.py", "def users(): return []\n", "fix(api): handle empty list"),
+    ]
+    for filename, content, subject in history:
+        commit_file(repo, filename, content, subject + suffix)
     return repo
