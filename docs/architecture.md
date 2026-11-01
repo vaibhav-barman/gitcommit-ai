@@ -20,7 +20,20 @@ Git operations (diff extraction, commit history analysis, working-tree inspectio
 
 ## 2. Module Responsibilities
 
-The codebase follows a `src`-based package layout (`src/git_commit_ai/`) divided into six cohesive packages with a strictly one-way dependency direction (`cli → agents → context → git/core`; `llm` is used by `agents` and the CLI):
+The codebase follows a `src`-based package layout (`src/git_commit_ai/`) divided into six cohesive packages with a strictly one-way dependency direction. The graph below is the import graph as it stands (implied edges are left out):
+
+```mermaid
+flowchart LR
+    cli["cli"] --> agents["agents"]
+    cli --> git["git"]
+    agents --> context["context"]
+    agents --> llm["llm"]
+    context --> core["core"]
+    git --> core
+    llm --> core
+```
+
+(The CLI also imports `context`, `core` and `llm` directly: it builds the provider and prints the deterministic reports. `agents` never imports `git`, and nothing below `cli` imports it.)
 
 ```
 src/git_commit_ai/
@@ -31,6 +44,8 @@ src/git_commit_ai/
 ├── agents/     # LangGraph orchestration: analyst, generator, critic, reflection loop
 └── cli/        # User-facing terminal interface
 ```
+
+Outside the package, `scripts/` holds developer tooling that is not installed (see §2G).
 
 ### A. Core Module (`git_commit_ai.core`)
 
@@ -98,7 +113,7 @@ Implements all Git interactions using Python's `subprocess` standard library:
   - Resolves Git rename syntax (`old => new` and `{old => new}`) to identify original and destination paths.
   - Flags binary files without attempting lossy UTF-8 decoding.
 - **`history.py` (`CommitHistoryExtractor`)**:
-  - Extracts recent non-merge commits (`git log -n <count> --no-merges`). `exclude_head=True` starts at `HEAD^`, so a commit being amended is not offered as an example of itself.
+  - Extracts recent non-merge commits (`git log -n <count> --no-merges`). `exclude_head=True` starts at the parent of `revision` (`HEAD` by default), so a commit being amended is not offered as an example of itself. `revision` sets where the walk starts, which lets the evaluation harness show the generator only what was older than a replayed commit.
   - Employs unique delimiters (`---GCAI_COMMIT_DELIM---` and `---GCAI_FIELD_DELIM---`) inside `--format` to parse multiline commit bodies and special characters reliably.
 - **`snapshots.py` (`SnapshotManager`)**:
   - Computes the staged tree hash via `git write-tree` without creating a commit object, and records the `HEAD` commit.
@@ -175,6 +190,19 @@ Builds the user-facing command-line tool using [Typer](https://typer.tiangolo.co
 
 See §5.
 
+### G. Tooling outside the package (`scripts/`)
+
+Not part of the wheel (it is in the sdist so the tests can run from it), but type-checked, linted and tested like the rest.
+
+- **`scripts/eval/`**: the evaluation harness (`python -m scripts.eval REPO`).
+  - `replay.py`: for each of the last N non-merge commits, `CommitDiffExtractor` (a `DiffExtractor` that diffs `<parent> <commit>`, the empty tree for a root commit, and labels it `DiffMode.AMEND`) reads the change straight from the object store, and `CommitHistoryExtractor.get_history(revision=<commit>, exclude_head=True)` supplies only older commits. No checkout, no index changes.
+  - `metrics.py`: deterministic checks on the generated message: convention family, subject length against the profile built from the older history, imperative mood (the style analyzer's own definition), and capitalization, trailing-period, scope and body agreement with the real commit. Checks that do not apply (scope for a non-Conventional commit) are excluded from the denominator.
+  - `report.py`: the typed `Report` (JSON, `schema_version` 1), aggregation, and the Markdown summary.
+  - `runner.py` / `cli.py`: run the unchanged `CommitMessageGraph` per commit; a commit that cannot be evaluated is recorded with its error and left out of the percentages.
+  - `offline.py`: a rule-based `FakeLLM` for `--offline`. Its first draft is naive, and later drafts follow the rules in the generator's prompt, reading only the rules and facts sections, never the diff. Offline numbers test the harness; they say nothing about a model.
+  - Details and the metric definitions: [`scripts/eval/README.md`](../scripts/eval/README.md).
+- **`scripts/demo/prepare.sh`** builds the throwaway repository (scoped Conventional history with bodies, one staged change) and a `git-ai-commit` shim; `docs/demo.tape` is the VHS script and `make demo` runs both.
+
 ---
 
 ## 3. Git Command Execution & Safety Strategy
@@ -245,7 +273,7 @@ The agent graph that consumes these results is described in §5.
 
 ## 5. AI Orchestration
 
-LLM calls happen only inside `git_commit_ai.agents`. Everything the agents consume (`DiffResult`, `RepositoryContext`) comes from the deterministic layers, and the CLI does all Git access, so the graph itself never touches Git.
+LLM calls happen only inside `git_commit_ai.agents`. Everything the agents consume (`DiffResult`, `RepositoryContext`) comes from the deterministic layers, and the CLI does all Git access, so the graph itself never touches Git. The README shows the same graph in a simplified form, with the abort paths added (analyst or first-draft provider errors end the run before any draft exists).
 
 ```mermaid
 graph TD
@@ -425,12 +453,15 @@ sequenceDiagram
 | LangGraph State Graph | **Implemented** | Analyst, retrieval, generator, critic nodes; capped reflection loop with best-draft fallback |
 | Diff Budgeting | **Implemented** | Water-filled per-file truncation; binary files summarised without patches |
 | CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`, `config`, `hook`; `git ai-commit` entry point |
-| Unit & Integration Tests | **Implemented** | 479 tests using isolated temporary Git repositories and `FakeLLM`; no network |
+| Unit & Integration Tests | **Implemented** | Unit, integration and eval tests using isolated temporary Git repositories and `FakeLLM`; no network |
 | Retry & Degradation | **Implemented** | Bounded exponential backoff; best-draft fallback on late provider errors |
-| Layered Settings | **Implemented** | flags > environment > `.env` > defaults; `config` command with masked secrets |
+| Layered Settings | **Implemented** | flags > environment > `.env` (current directory or repository root only) > defaults; `config` command with masked secrets |
 | Hint & Bodies | **Implemented** | `--hint`; deterministic body rule; 72-column layout; body critic rules |
 | Amend / No-verify | **Implemented** | `DiffMode.AMEND`, HEAD-aware staleness guard, passthrough flags |
 | Hook Installer | **Implemented** | Backs up and chains foreign hooks; never blocks a commit |
 | Repository States | **Implemented** | Merge/cherry-pick/revert refused, rebase noted, detached HEAD warned |
+| Interrupted-run guard | **Implemented** | `--yes` refuses to commit a draft left unfinished by a provider error unless `--accept-partial` |
+| Evaluation Harness | **Implemented** | `scripts/eval`: replays history through the graph, deterministic metrics, JSON and Markdown reports, `--offline` mode |
+| Demo Tooling | **Implemented** | `docs/demo.tape`, `scripts/demo/prepare.sh`, `make demo`; the GIF itself has to be recorded with a live provider |
 | CI & Packaging | **Implemented** | GitHub Actions (Ruff, mypy, pytest on 3.11–3.13, build smoke test); `py.typed` |
 | Interactive TUI | *Planned* | Interactive review and editing of the proposed message |

@@ -33,6 +33,9 @@ No version has been released yet; everything below is under **Unreleased**.
   length, imperative mood, capitalization, punctuation, scope and body agreement, critic findings
   before and after reflection, rounds used). Writes JSON and Markdown reports; `--offline` uses a
   deterministic stand-in for the model so it needs no network.
+- **Demo tooling**: `docs/demo.tape` (a VHS script), `scripts/demo/prepare.sh` (builds the throwaway
+  repository it records) and `make demo`. The GIF itself is recorded with a live provider and is
+  not committed.
 - **`git ai-commit`** via a `git-ai-commit` console script, which also offers `config` and `hook`.
 - **Resilience**: rate limits and transient provider errors (timeouts, dropped connections, 5xx)
   are retried with bounded exponential backoff (`GITCOMMIT_AI_MAX_RETRIES`,
@@ -57,6 +60,9 @@ No version has been released yet; everything below is under **Unreleased**.
 
 ### Changed
 
+- The README is now a landing page: logo, a captured sample run, a comparison with one-shot
+  prompts, a quick start, Mermaid diagrams, collapsible reference sections and an evaluation
+  section whose results are still to be filled in. `docs/architecture.md` is aligned with it.
 - Minimum supported Python is 3.11.
 - The missing-SDK error also gives the `pipx` command, since `pip install` would target the wrong
   environment for a pipx install.
