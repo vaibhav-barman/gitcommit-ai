@@ -32,9 +32,10 @@ No version has been released yet; everything below is under **Unreleased**.
   are retried with bounded exponential backoff (`GITCOMMIT_AI_MAX_RETRIES`,
   `GITCOMMIT_AI_RETRY_BASE_DELAY`, `GITCOMMIT_AI_RETRY_MAX_DELAY`). A provider error after the first
   draft returns the best draft so far with a visible warning instead of aborting.
-- **Settings**: `.env` loading with precedence flags > environment > `.env` > defaults, a
-  `GITCOMMIT_AI_ENV_FILE` override, and a `config` command that shows each value's source and masks
-  secrets.
+- **Settings**: `.env` loading with precedence flags > environment > `.env` > defaults. A `.env`
+  is read only from the current directory or the Git repository root, never from parent
+  directories or the home directory. A `GITCOMMIT_AI_ENV_FILE` override, and a `config` command
+  that shows each value's source and masks secrets.
 - **Message bodies**: a short body wrapped at 72 columns is generated when the repository uses
   bodies or the diff is large, with new critic rules for the body.
 - **Staleness guard** on committing: the staged tree and `HEAD` must be unchanged since the message

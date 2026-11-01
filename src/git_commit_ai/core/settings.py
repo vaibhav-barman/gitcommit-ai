@@ -80,18 +80,24 @@ class Settings:
         return self.source_of_variable(variable) if variable else SettingSource.DEFAULT
 
 
-def load_settings(env: Mapping[str, str], start_dir: Path | None = None) -> Settings:
-    """Load settings from ``env`` and the nearest ``.env`` file.
+def load_settings(
+    env: Mapping[str, str],
+    start_dir: Path | None = None,
+    repo_root: Path | None = None,
+) -> Settings:
+    """Load settings from ``env`` and a ``.env`` file in one of two places.
 
-    The ``.env`` file is the first one found walking up from ``start_dir``
-    (default: the current directory). Set ``GITCOMMIT_AI_ENV_FILE`` to a path to
+    Only ``start_dir`` (default: the current directory) and ``repo_root`` are
+    searched, in that order. Parent directories, the home directory and anything
+    above the repository root are never looked at, so a stray ``.env`` elsewhere
+    cannot change the configuration. Set ``GITCOMMIT_AI_ENV_FILE`` to a path to
     use that file instead, or to an empty string to skip ``.env`` loading.
     Real environment variables always win over ``.env`` values.
 
     Raises:
         ConfigurationError: If a value is invalid or the named env file is missing.
     """
-    dotenv_path = _locate_dotenv(env, start_dir or Path.cwd())
+    dotenv_path = _locate_dotenv(env, start_dir or Path.cwd(), repo_root)
     file_values = _read_dotenv(dotenv_path) if dotenv_path else {}
     process_env = {key: value for key, value in env.items() if value}
     environment = {**file_values, **process_env}
@@ -111,7 +117,7 @@ def mask_secret(value: str) -> str:
     return "*" * _MASK_MIN_LENGTH + value[-_MASK_VISIBLE:]
 
 
-def _locate_dotenv(env: Mapping[str, str], start_dir: Path) -> Path | None:
+def _locate_dotenv(env: Mapping[str, str], start_dir: Path, repo_root: Path | None) -> Path | None:
     if ENV_FILE_VARIABLE in env:
         explicit = env[ENV_FILE_VARIABLE]
         if not explicit:
@@ -120,8 +126,8 @@ def _locate_dotenv(env: Mapping[str, str], start_dir: Path) -> Path | None:
         if not path.is_file():
             raise ConfigurationError(f"{ENV_FILE_VARIABLE} points to a missing file: {path}")
         return path
-    start = start_dir.resolve()
-    for directory in (start, *start.parents):
+    searched = (start_dir, repo_root) if repo_root else (start_dir,)
+    for directory in searched:
         candidate = directory / _DOTENV_NAME
         if candidate.is_file():
             return candidate

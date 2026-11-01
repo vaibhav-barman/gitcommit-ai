@@ -95,19 +95,72 @@ def test_dotenv_is_never_written_into_the_process_environment(
     assert "OPENAI_API_KEY" not in os.environ
 
 
-def test_dotenv_is_found_in_a_parent_directory(tmp_path: Path) -> None:
-    path = _write_env(tmp_path, "GITCOMMIT_AI_MODEL=parent\n")
-    nested = tmp_path / "a" / "b"
-    nested.mkdir(parents=True)
-    settings = load_settings({}, nested)
-    assert settings.dotenv_path == path
-    assert settings.config.llm_model == "parent"
+class TestDotenvScope:
+    """Only the working directory and the repository root are ever searched."""
 
+    def test_found_in_the_working_directory(self, tmp_path: Path) -> None:
+        path = _write_env(tmp_path, "GITCOMMIT_AI_MODEL=here\n")
+        settings = load_settings({}, tmp_path)
+        assert settings.dotenv_path == path
+        assert settings.config.llm_model == "here"
 
-def test_the_nearest_dotenv_wins(tmp_path: Path) -> None:
-    _write_env(tmp_path, "GITCOMMIT_AI_MODEL=parent\n")
-    _write_env(tmp_path / "child", "GITCOMMIT_AI_MODEL=child\n")
-    assert load_settings({}, tmp_path / "child").config.llm_model == "child"
+    def test_found_in_the_repository_root_from_a_subdirectory(self, tmp_path: Path) -> None:
+        path = _write_env(tmp_path, "GITCOMMIT_AI_MODEL=root\n")
+        nested = tmp_path / "src" / "pkg"
+        nested.mkdir(parents=True)
+        settings = load_settings({}, nested, repo_root=tmp_path)
+        assert settings.dotenv_path == path
+        assert settings.config.llm_model == "root"
+
+    def test_the_working_directory_beats_the_repository_root(self, tmp_path: Path) -> None:
+        _write_env(tmp_path, "GITCOMMIT_AI_MODEL=root\n")
+        _write_env(tmp_path / "sub", "GITCOMMIT_AI_MODEL=sub\n")
+        settings = load_settings({}, tmp_path / "sub", repo_root=tmp_path)
+        assert settings.config.llm_model == "sub"
+
+    def test_a_directory_between_the_two_is_not_searched(self, tmp_path: Path) -> None:
+        _write_env(tmp_path / "src", "GITCOMMIT_AI_MODEL=between\n")
+        nested = tmp_path / "src" / "pkg"
+        nested.mkdir()
+        settings = load_settings({}, nested, repo_root=tmp_path)
+        assert settings.dotenv_path is None
+        assert settings.config.llm_model is None
+
+    def test_a_parent_of_the_working_directory_is_not_searched(self, tmp_path: Path) -> None:
+        _write_env(tmp_path, "GITCOMMIT_AI_MODEL=parent\n")
+        nested = tmp_path / "a" / "b"
+        nested.mkdir(parents=True)
+        settings = load_settings({}, nested)
+        assert settings.dotenv_path is None
+        assert settings.config.llm_model is None
+
+    def test_nothing_above_the_repository_root_is_searched(self, tmp_path: Path) -> None:
+        _write_env(tmp_path, "GITCOMMIT_AI_MODEL=above\n")
+        repo = tmp_path / "work" / "repo"
+        repo.mkdir(parents=True)
+        assert load_settings({}, repo, repo_root=repo).dotenv_path is None
+
+    def test_the_home_directory_is_not_searched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _write_env(home, "OPENAI_API_KEY=home-key\n")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        repo = home / "projects" / "repo"
+        repo.mkdir(parents=True)
+        settings = load_settings({}, repo, repo_root=repo)
+        assert settings.dotenv_path is None
+        assert "OPENAI_API_KEY" not in settings.environment
+
+    def test_a_repository_root_elsewhere_is_searched_after_the_working_directory(
+        self, tmp_path: Path
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        repo = tmp_path / "repo"
+        path = _write_env(repo, "GITCOMMIT_AI_MODEL=repo\n")
+        assert load_settings({}, elsewhere, repo_root=repo).dotenv_path == path
 
 
 def test_env_file_variable_selects_a_specific_file(tmp_path: Path) -> None:

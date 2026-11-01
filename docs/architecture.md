@@ -62,8 +62,8 @@ Contains data structures and runtime configuration shared across all layers:
   - `ProviderName`: `StrEnum` of the supported backends.
   - API keys are deliberately **not** part of the configuration; they are read from the environment when a provider is created, so they never appear in reprs or logs.
 - **`settings.py`**:
-  - `load_settings(env, start_dir)` layers **flags > process environment > `.env` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, default).
-  - The `.env` file is the nearest one found walking up from the current directory, parsed with `python-dotenv` into a dict. It is **never** written into `os.environ`, so its values cannot leak into child processes. `GITCOMMIT_AI_ENV_FILE` names a specific file, or disables loading when empty. Blank values count as unset at every layer.
+  - `load_settings(env, start_dir, repo_root)` layers **flags > process environment > `.env` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, default).
+  - The `.env` file is looked for in exactly two places: `start_dir` (the current directory) and then `repo_root`. Nothing else is searched: not parent directories, not the directories between the two, not the home directory, so a stray `.env` elsewhere cannot change the configuration. `core` knows nothing about Git, so the CLI resolves the root (`cli/settings_loader.py`, via `RepositoryInspector.find_repository_root()`); outside a repository, or without Git, only the current directory is searched. The file is parsed with `python-dotenv` into a dict. It is **never** written into `os.environ`, so its values cannot leak into child processes. `GITCOMMIT_AI_ENV_FILE` names a specific file, or disables loading when empty. Blank values count as unset at every layer.
   - `Settings.with_flags()` applies command-line flags on top (a flag left unset does not override anything); `mask_secret()` keeps only the last four characters of a secret.
 - **`exceptions.py`**:
   - Hierarchical domain exceptions rooted at `GitCommitAIError`:
@@ -160,6 +160,7 @@ Builds the user-facing command-line tool using [Typer](https://typer.tiangolo.co
 - `config`: shows each effective setting with its source and the `.env` file in use; API keys are masked to their last four characters.
 - `hook install` / `hook uninstall`: manage the `prepare-commit-msg` hook. A hidden `hook run` is what the hook calls; it writes a proposal into the message file above Git's comments and **never blocks a commit**: no staged changes, a pending merge, a user template, a missing key, a provider failure or any unexpected error only print a note.
 - `git-ai-commit` console script: a command group whose callback is `generate`, so a bare `git ai-commit --dry-run` works (git finds `git-<name>` executables on `PATH`) while `config` and `hook` remain reachable. It also accepts `-h`, because git intercepts `--help` for external commands.
+- `cli/settings_loader.py` is the one place commands load settings: it resolves the repository root and calls `load_settings`.
 - Error handling maps all `GitCommitAIError` exceptions to clean terminal stderr messages and exit code 1.
 
 ### E. LLM Module (`git_commit_ai.llm`)

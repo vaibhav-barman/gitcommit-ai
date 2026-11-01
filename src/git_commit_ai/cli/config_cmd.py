@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
-
 import typer
 
+from git_commit_ai.cli.settings_loader import load_cli_settings
 from git_commit_ai.core.config import ENV_FIELDS, ProviderName
 from git_commit_ai.core.exceptions import GitCommitAIError
-from git_commit_ai.core.settings import ENV_FILE_VARIABLE, load_settings, mask_secret
+from git_commit_ai.core.settings import ENV_FILE_VARIABLE, mask_secret
 from git_commit_ai.llm.factory import api_key_variable, default_model
 
 
@@ -20,7 +19,7 @@ def config() -> None:
     shown here.
     """
     try:
-        settings = load_settings(os.environ)
+        settings = load_cli_settings()
     except GitCommitAIError as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc

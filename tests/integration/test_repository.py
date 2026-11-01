@@ -55,6 +55,15 @@ def test_repository_root_resolution(populated_repo: Path) -> None:
     assert root == str(populated_repo.resolve())
 
 
+def test_find_repository_root_returns_the_root_from_a_subdirectory(populated_repo: Path) -> None:
+    inspector = RepositoryInspector(repo_path=str(populated_repo / "src"))
+    assert inspector.find_repository_root() == str(populated_repo.resolve())
+
+
+def test_find_repository_root_is_none_outside_a_repository(tmp_path: Path) -> None:
+    assert RepositoryInspector(repo_path=str(tmp_path)).find_repository_root() is None
+
+
 def test_empty_repository_handling(empty_repo: Path) -> None:
     """Verify inspection on a repository with zero commits."""
     inspector = RepositoryInspector(repo_path=str(empty_repo))

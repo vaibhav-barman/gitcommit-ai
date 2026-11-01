@@ -162,6 +162,105 @@ class TestGeneratePrecedence:
         assert "GITCOMMIT_AI_MAX_ITERATIONS" in result.stderr
 
 
+class TestDotenvDiscovery:
+    """``.env`` is read from the working directory or the repository root, nowhere else."""
+
+    @pytest.fixture(autouse=True)
+    def discover(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(ENV_FILE_VARIABLE)
+
+    @pytest.fixture
+    def repo(self, tmp_path: Path) -> Path:
+        repo = scoped_history_repo(tmp_path / "outer" / "repo")
+        stage_file(repo, "src/api/orders.py", "def orders(): ...\n")
+        return repo
+
+    def test_repository_root_is_used_from_a_subdirectory(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (repo / ".env").write_text("GITCOMMIT_AI_MODEL=from-root\n")
+        monkeypatch.chdir(repo / "src" / "api")
+
+        result = runner.invoke(app, ["config"])
+
+        assert result.exit_code == 0
+        assert f".env file:  {(repo / '.env').resolve()}" in result.stdout
+        assert "from-root" in result.stdout
+
+    def test_working_directory_beats_repository_root(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (repo / ".env").write_text("GITCOMMIT_AI_MODEL=from-root\n")
+        (repo / "src").mkdir(exist_ok=True)
+        (repo / "src" / ".env").write_text("GITCOMMIT_AI_MODEL=from-cwd\n")
+        monkeypatch.chdir(repo / "src")
+
+        result = runner.invoke(app, ["config"])
+
+        assert "from-cwd" in result.stdout
+        assert "from-root" not in result.stdout
+
+    def test_a_dotenv_above_the_repository_is_ignored(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (repo.parent / ".env").write_text(f"OPENAI_API_KEY={SECRET}\n")
+        monkeypatch.chdir(repo)
+
+        result = runner.invoke(app, ["config"])
+
+        assert ".env file:  none found" in result.stdout
+        assert "OPENAI_API_KEY = not set" in result.stdout
+
+    def test_generate_ignores_a_dotenv_above_the_repository(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (repo.parent / ".env").write_text("GITCOMMIT_AI_PROVIDER=anthropic\n")
+        monkeypatch.chdir(repo)
+        created = use_llm(monkeypatch, scripted_llm(["feat(api): add orders endpoint"]))
+
+        result = runner.invoke(app, ["generate", "--dry-run"])
+
+        assert result.exit_code == 0, result.stderr
+        assert created.configs[0].llm_provider.value == "openai"
+
+    def test_generate_reads_the_root_of_the_repository_given_by_path(
+        self, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (repo / ".env").write_text("GITCOMMIT_AI_PROVIDER=anthropic\n")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        created = use_llm(monkeypatch, scripted_llm(["feat(api): add orders endpoint"]))
+
+        result = runner.invoke(app, ["generate", "--path", str(repo / "src"), "--dry-run"])
+
+        assert result.exit_code == 0, result.stderr
+        assert created.configs[0].llm_provider.value == "anthropic"
+
+    def test_config_works_outside_a_repository(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".env").write_text("GITCOMMIT_AI_MODEL=plain-dir\n")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["config"])
+
+        assert result.exit_code == 0
+        assert "plain-dir" in result.stdout
+
+    def test_config_works_without_git_installed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".env").write_text("GITCOMMIT_AI_MODEL=no-git\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+
+        result = runner.invoke(app, ["config"])
+
+        assert result.exit_code == 0
+        assert "no-git" in result.stdout
+
+
 class TestGitEntryPoint:
     def test_bare_invocation_runs_generate_with_its_flags(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

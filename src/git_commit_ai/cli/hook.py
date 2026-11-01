@@ -10,9 +10,9 @@ from typing import NoReturn
 import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
+from git_commit_ai.cli.settings_loader import load_cli_settings
 from git_commit_ai.core.exceptions import GitCommitAIError
 from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
-from git_commit_ai.core.settings import load_settings
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
 from git_commit_ai.git.hooks import HOOK_NAME, SKIP_VARIABLE, HookInstaller
@@ -99,7 +99,7 @@ def _propose(message_file: Path, source: str, path: str) -> None:
     if _has_user_content(existing):
         return
 
-    settings = load_settings(os.environ)
+    settings = load_cli_settings(path)
     config = settings.config
     inspector = RepositoryInspector(repo_path=path, config=config)
     if inspector.inspect().operation is not RepositoryOperation.NONE:

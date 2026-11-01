@@ -88,6 +88,18 @@ class RepositoryInspector:
             raise NotAGitRepositoryError(self._repo_path)
         return result.stdout.strip()
 
+    def find_repository_root(self) -> str | None:
+        """Return the repository root, or ``None`` if the path is not in a repository.
+
+        Raises:
+            GitNotFoundError: If Git is not installed.
+        """
+        self._ensure_git_installed()
+        try:
+            return self.get_repository_root()
+        except NotAGitRepositoryError:
+            return None
+
     def get_branch_name(self) -> str | None:
         """Return the current branch name, or ``None`` if HEAD is detached."""
         branch, _ = self._get_branch_info()

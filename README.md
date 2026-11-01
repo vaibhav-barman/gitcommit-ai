@@ -144,7 +144,7 @@ Settings are resolved in this order, highest priority first:
 
 1. **Command-line flags** (`--provider`, `--model`, `--max-iterations`)
 2. **Environment variables**
-3. **A `.env` file**: the nearest one found walking up from the current directory
+3. **A `.env` file**: in the current directory, otherwise in the root of the Git repository (parent directories and your home directory are never searched)
 4. **Defaults**
 
 The `.env` file is parsed into memory only; it is never exported into the process environment. Set `GITCOMMIT_AI_ENV_FILE` to use a specific file, or to an empty string to skip `.env` loading. Blank values count as unset. See [`.env.example`](https://github.com/vaibhav-barman/gitcommit-ai/blob/main/.env.example) for a template, and run `git-ai-commit config` to see what is in effect:
@@ -480,6 +480,7 @@ gitcommit-ai/
 │           ├── main.py               # Typer CLI application
 │           ├── generate.py           # `generate` command
 │           ├── config_cmd.py         # `config` command
+│           ├── settings_loader.py    # Settings for a command: cwd + repo root `.env`
 │           ├── hook.py               # `hook install|uninstall|run`
 │           └── git_subcommand.py     # `git ai-commit` entry point
 ├── tests/

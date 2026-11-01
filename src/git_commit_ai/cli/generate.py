@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, NoReturn
 
 import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
+from git_commit_ai.cli.settings_loader import load_cli_settings
 from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
 from git_commit_ai.core.exceptions import GitCommitAIError
 from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
-from git_commit_ai.core.settings import load_settings
 from git_commit_ai.git.committer import GitCommitter
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
@@ -85,7 +84,7 @@ def generate(
     if hint is not None and len(hint) > _MAX_HINT_CHARS:
         _fail(f"--hint is {len(hint)} characters; keep it under {_MAX_HINT_CHARS}.")
     try:
-        settings = load_settings(os.environ).with_flags(
+        settings = load_cli_settings(path).with_flags(
             llm_provider=provider, llm_model=model, max_iterations=max_iterations
         )
         config = settings.config
