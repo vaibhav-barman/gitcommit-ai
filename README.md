@@ -348,6 +348,7 @@ uv sync --all-extras          # every provider SDK; the backend tests import the
 uv run pytest                 # no network, no API keys
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests scripts # strict
+uv run python -m scripts.check_docs   # every flag, variable, path and link in the docs vs the code
 ```
 
 Tests run in temporary Git repositories and drive the agents with `FakeLLM` and mocked SDK clients. CI runs Ruff, mypy and the tests on Python 3.11, 3.12 and 3.13, plus a packaging smoke test. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md).

@@ -33,6 +33,10 @@ No version has been released yet; everything below is under **Unreleased**.
   length, imperative mood, capitalization, punctuation, scope and body agreement, critic findings
   before and after reflection, rounds used). Writes JSON and Markdown reports; `--offline` uses a
   deterministic stand-in for the model so it needs no network.
+- **Documentation check** (`python -m scripts.check_docs`, also run by the test suite): every command,
+  flag, environment variable, provider default, path, link, heading anchor and Mermaid diagram in the
+  docs is checked against the code, and the layer diagrams against the real import graph. A test
+  enforces the dependency direction between packages.
 - **Demo tooling**: `docs/demo.tape` (a VHS script), `scripts/demo/prepare.sh` (builds the throwaway
   repository it records) and `make demo`. The GIF itself is recorded with a live provider and is
   not committed.

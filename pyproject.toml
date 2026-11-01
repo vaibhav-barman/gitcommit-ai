@@ -80,6 +80,8 @@ include = [
     "/CONTRIBUTING.md",
     "/LICENSE",
     "/.env.example",
+    "/Makefile",
+    "/.github",
 ]
 
 [tool.pytest.ini_options]

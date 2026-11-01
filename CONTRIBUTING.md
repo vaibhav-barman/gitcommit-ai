@@ -25,11 +25,13 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy src tests scripts
 uv run pytest
+uv run python -m scripts.check_docs
 ```
 
 - **Ruff** lints and formats (line length 99).
 - **mypy** runs in strict mode. Annotate everything, including tests.
 - **pytest** must pass with no network access.
+- **`scripts.check_docs`** reads the docs and checks every command, flag, environment variable, default, path, link, anchor and Mermaid diagram against the code. It also runs inside pytest, so a stale doc fails CI. Add a flag or a variable to the code and it will tell you where the docs need it.
 
 CI tests Python 3.11, 3.12, and 3.13. To reproduce one locally without disturbing your main
 environment:

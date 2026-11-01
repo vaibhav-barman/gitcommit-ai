@@ -20,7 +20,7 @@ Git operations (diff extraction, commit history analysis, working-tree inspectio
 
 ## 2. Module Responsibilities
 
-The codebase follows a `src`-based package layout (`src/git_commit_ai/`) divided into six cohesive packages with a strictly one-way dependency direction. The graph below is the import graph as it stands (implied edges are left out):
+The codebase follows a `src`-based package layout (`src/git_commit_ai/`) divided into six cohesive packages with a strictly one-way dependency direction. The graph below is the import graph as it stands (implied edges are left out). `tests/unit/test_layers.py` fails if a module imports against it, and `scripts/check_docs.py` fails if this diagram or the README's stops matching the code:
 
 ```mermaid
 flowchart LR
