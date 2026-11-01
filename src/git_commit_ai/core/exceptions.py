@@ -102,3 +102,11 @@ class RateLimitError(LLMError):
 
 class LLMResponseError(LLMError):
     """Raised when a provider returns an empty, malformed, or unusable response."""
+
+
+class AgentStateError(GitCommitAIError):
+    """Raised when a graph node runs before the data it depends on exists."""
+
+    def __init__(self, missing: str) -> None:
+        super().__init__(f"Agent state is missing '{missing}'; an upstream node did not run")
+        self.missing = missing

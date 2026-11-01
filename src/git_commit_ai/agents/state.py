@@ -6,6 +6,7 @@ import enum
 
 from pydantic import BaseModel, Field
 
+from git_commit_ai.core.exceptions import AgentStateError
 from git_commit_ai.core.schemas import DiffResult, HistoricalCommit, RepositoryContext
 
 
@@ -95,3 +96,15 @@ class AgentState(BaseModel):
     context: RepositoryContext | None = None
     drafts: list[Draft] = Field(default_factory=list)
     iteration: int = Field(default=0, ge=0, description="Completed generation rounds")
+
+    def drafting_inputs(self) -> tuple[DiffDigest, DiffAnalysis, RepositoryContext]:
+        """Return the upstream results that generator and critic need.
+
+        Raises:
+            AgentStateError: If the analyst or context node has not run yet.
+        """
+        if self.diff_digest is None or self.analysis is None:
+            raise AgentStateError("analysis")
+        if self.context is None:
+            raise AgentStateError("context")
+        return self.diff_digest, self.analysis, self.context
