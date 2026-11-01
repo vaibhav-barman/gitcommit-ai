@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING, NoReturn
 import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
-from git_commit_ai.core.config import GitCommitAIConfig, ProviderName
+from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
 from git_commit_ai.core.exceptions import GitCommitAIError
 from git_commit_ai.core.schemas import DiffMode
+from git_commit_ai.core.settings import load_settings
 from git_commit_ai.git.committer import GitCommitter
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
 
 def generate(
+    ctx: typer.Context,
     path: str = typer.Option(".", "--path", "-p", help="Path to the Git repository."),
     provider: ProviderName | None = typer.Option(
         None, "--provider", help="LLM provider (default: GITCOMMIT_AI_PROVIDER or openai)."
@@ -50,8 +52,13 @@ def generate(
     The message is printed to stdout; progress and diagnostics go to stderr.
     Unless --dry-run is given, you are asked to confirm before committing.
     """
+    if ctx.invoked_subcommand is not None:
+        return
     try:
-        config = _build_config(provider, model, max_iterations)
+        settings = load_settings(os.environ).with_flags(
+            llm_provider=provider, llm_model=model, max_iterations=max_iterations
+        )
+        config = settings.config
         inspector = RepositoryInspector(repo_path=path, config=config)
         info = inspector.inspect()
         diff = DiffExtractor(inspector=inspector, config=config).extract(DiffMode.STAGED)
@@ -62,7 +69,7 @@ def generate(
         snapshots = SnapshotManager(inspector, config)
         snapshot = snapshots.capture()
 
-        llm = create_provider(config, on_retry=_announce_retry)
+        llm = create_provider(config, env=settings.environment, on_retry=_announce_retry)
         _note(f"Generating a commit message with {llm.name}/{llm.model}...")
         result = CommitMessageGraph(llm, config).run(diff, history)
 
@@ -80,38 +87,6 @@ def generate(
         _note(f"Committed {short_hash}")
     except GitCommitAIError as exc:
         _fail(str(exc))
-
-
-_git_subcommand = typer.Typer(
-    add_completion=False,
-    context_settings={"help_option_names": ["-h", "--help"]},
-)
-_git_subcommand.command()(generate)
-
-
-def git_ai_commit() -> None:
-    """Entry point for ``git ai-commit``: runs ``generate`` directly.
-
-    Git intercepts ``--help`` for external subcommands and looks for a man
-    page, so ``-h`` is accepted as well.
-    """
-    _git_subcommand()
-
-
-def _build_config(
-    provider: ProviderName | None,
-    model: str | None,
-    max_iterations: int | None,
-) -> GitCommitAIConfig:
-    config = GitCommitAIConfig.from_env(os.environ)
-    overrides: dict[str, object] = {}
-    if provider is not None:
-        overrides["llm_provider"] = provider
-    if model is not None:
-        overrides["llm_model"] = model
-    if max_iterations is not None:
-        overrides["max_iterations"] = max_iterations
-    return config.model_copy(update=overrides)
 
 
 def _nothing_staged_message(info: RepositoryInfo) -> str:

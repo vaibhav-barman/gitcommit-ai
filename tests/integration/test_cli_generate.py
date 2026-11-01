@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
-from git_commit_ai.cli.generate import git_ai_commit
+from git_commit_ai.cli.git_subcommand import git_ai_commit
 from git_commit_ai.cli.main import app
 from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
 from git_commit_ai.llm import FakeLLM
 from git_commit_ai.llm.retry import RetryEvent
+from tests.fixtures.cli import use_llm
 from tests.fixtures.git_repo import (
     commit_count,
     head_message,
@@ -38,6 +39,7 @@ GOOD = "feat(api): add orders endpoint"
 
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITCOMMIT_AI_ENV_FILE", "")
     for var in (
         "GITCOMMIT_AI_PROVIDER",
         "GITCOMMIT_AI_MODEL",
@@ -48,18 +50,6 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "GOOGLE_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
-
-
-def _use(monkeypatch: pytest.MonkeyPatch, llm: FakeLLM) -> list[GitCommitAIConfig]:
-    """Make the CLI use ``llm`` and record the configs it was created with."""
-    seen: list[GitCommitAIConfig] = []
-
-    def fake_create(config: GitCommitAIConfig, **_: object) -> FakeLLM:
-        seen.append(config)
-        return llm
-
-    monkeypatch.setattr("git_commit_ai.cli.generate.create_provider", fake_create)
-    return seen
 
 
 @pytest.fixture
@@ -77,7 +67,7 @@ class TestOutput:
     def test_dry_run_prints_the_message_and_does_not_commit(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _use(monkeypatch, scripted_llm([GOOD]))
+        use_llm(monkeypatch, scripted_llm([GOOD]))
         before = commit_count(staged_repo)
 
         result = _generate(staged_repo, "--dry-run")
@@ -90,7 +80,7 @@ class TestOutput:
     def test_verbose_reports_convention_examples_and_critic_rounds(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _use(monkeypatch, scripted_llm(["Add orders endpoint", GOOD]))
+        use_llm(monkeypatch, scripted_llm(["Add orders endpoint", GOOD]))
 
         result = _generate(staged_repo, "--dry-run", "--verbose")
 
@@ -107,7 +97,7 @@ class TestOutput:
     def test_unapproved_best_draft_is_shown_with_its_remaining_issues(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _use(monkeypatch, scripted_llm(["Added orders", "Added orders again"]))
+        use_llm(monkeypatch, scripted_llm(["Added orders", "Added orders again"]))
 
         result = _generate(staged_repo, "--dry-run", "--max-iterations", "2")
 
@@ -122,7 +112,7 @@ class TestDegradation:
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         llm = scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")})
-        _use(monkeypatch, llm)
+        use_llm(monkeypatch, llm)
 
         result = _generate(staged_repo, "--dry-run")
 
@@ -139,7 +129,7 @@ class TestDegradation:
             ["Added orders endpoint"],
             generator_errors={2: TransientLLMError("openai", "request timed out")},
         )
-        _use(monkeypatch, llm)
+        use_llm(monkeypatch, llm)
 
         result = _generate(staged_repo, "--dry-run")
 
@@ -152,7 +142,7 @@ class TestDegradation:
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         llm = scripted_llm([], generator_errors={1: RateLimitError("openai")})
-        _use(monkeypatch, llm)
+        use_llm(monkeypatch, llm)
 
         result = _generate(staged_repo, "--dry-run")
 
@@ -180,7 +170,7 @@ class TestCommitting:
     def test_yes_commits_without_prompting(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _use(monkeypatch, scripted_llm([GOOD]))
+        use_llm(monkeypatch, scripted_llm([GOOD]))
 
         result = _generate(staged_repo, "--yes")
 
@@ -189,7 +179,7 @@ class TestCommitting:
         assert "Committed" in result.stderr
 
     def test_confirming_commits(self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        _use(monkeypatch, scripted_llm([GOOD]))
+        use_llm(monkeypatch, scripted_llm([GOOD]))
 
         result = _generate(staged_repo, stdin="y\n")
 
@@ -199,7 +189,7 @@ class TestCommitting:
     def test_declining_aborts_without_committing(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _use(monkeypatch, scripted_llm([GOOD]))
+        use_llm(monkeypatch, scripted_llm([GOOD]))
         before = commit_count(staged_repo)
 
         result = _generate(staged_repo, stdin="n\n")
@@ -216,7 +206,7 @@ class TestCommitting:
             stage_file(staged_repo, "src/api/late.py", "x = 1\n")
             return inner.complete(messages)
 
-        _use(monkeypatch, FakeLLM(restage_midway))
+        use_llm(monkeypatch, FakeLLM(restage_midway))
         before = commit_count(staged_repo)
 
         result = _generate(staged_repo, "--yes")
@@ -230,7 +220,7 @@ class TestEdgeCases:
     def test_nothing_staged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         repo = scoped_history_repo(tmp_path / "repo")
         llm = scripted_llm([GOOD])
-        _use(monkeypatch, llm)
+        use_llm(monkeypatch, llm)
 
         result = _generate(repo, "--dry-run")
 
@@ -243,7 +233,7 @@ class TestEdgeCases:
     ) -> None:
         repo = scoped_history_repo(tmp_path / "repo")
         (repo / "src/api/users.py").write_text("changed\n", encoding="utf-8")
-        _use(monkeypatch, scripted_llm([GOOD]))
+        use_llm(monkeypatch, scripted_llm([GOOD]))
 
         result = _generate(repo, "--dry-run")
 
@@ -255,7 +245,7 @@ class TestEdgeCases:
     ) -> None:
         repo = init_repo(tmp_path / "fresh")
         stage_file(repo, "README.md", "# Fresh\n")
-        _use(monkeypatch, scripted_llm(["docs: add readme"]))
+        use_llm(monkeypatch, scripted_llm(["docs: add readme"]))
 
         result = _generate(repo, "--yes")
 
@@ -268,7 +258,7 @@ class TestEdgeCases:
         repo = scoped_history_repo(tmp_path / "binary")
         stage_file(repo, "assets/logo.png", bytes(range(256)) * 4)
         llm = scripted_llm(["feat(api): add logo asset"])
-        _use(monkeypatch, llm)
+        use_llm(monkeypatch, llm)
 
         result = _generate(repo, "--dry-run")
 
@@ -283,7 +273,7 @@ class TestEdgeCases:
         repo = scoped_history_repo(tmp_path / "repo")
         stage_file(repo, "src/api/big.py", "".join(f"value_{n} = {n}\n" for n in range(5_000)))
         llm = scripted_llm(["feat(api): add big module"])
-        _use(monkeypatch, llm)
+        use_llm(monkeypatch, llm)
 
         result = _generate(repo, "--dry-run")
 
@@ -292,7 +282,7 @@ class TestEdgeCases:
         assert len(llm.calls[0][1].content) < 30_000
 
     def test_not_a_repository(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        _use(monkeypatch, scripted_llm([GOOD]))
+        use_llm(monkeypatch, scripted_llm([GOOD]))
         plain = tmp_path / "plain"
         plain.mkdir()
 
@@ -308,7 +298,7 @@ class TestConfiguration:
     ) -> None:
         monkeypatch.setenv("GITCOMMIT_AI_PROVIDER", "gemini")
         monkeypatch.setenv("GITCOMMIT_AI_MAX_ITERATIONS", "5")
-        seen = _use(monkeypatch, scripted_llm([GOOD]))
+        seen = use_llm(monkeypatch, scripted_llm([GOOD])).configs
 
         result = _generate(
             staged_repo,
@@ -331,7 +321,7 @@ class TestConfiguration:
     ) -> None:
         monkeypatch.setenv("GITCOMMIT_AI_PROVIDER", "anthropic")
         monkeypatch.setenv("GITCOMMIT_AI_MAX_ITERATIONS", "4")
-        seen = _use(monkeypatch, scripted_llm([GOOD]))
+        seen = use_llm(monkeypatch, scripted_llm([GOOD])).configs
 
         _generate(staged_repo, "--dry-run")
 
@@ -369,7 +359,7 @@ class TestGitSubcommand:
         assert "--dry-run" in capsys.readouterr().out
 
     def test_runs_generate_directly_without_a_subcommand_name(self, staged_repo: Path) -> None:
-        launcher = "from git_commit_ai.cli.generate import git_ai_commit; git_ai_commit()"
+        launcher = "from git_commit_ai.cli.git_subcommand import git_ai_commit; git_ai_commit()"
         completed = subprocess.run(
             [sys.executable, "-c", launcher, "--path", str(staged_repo), "--provider", "openai"],
             capture_output=True,

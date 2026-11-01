@@ -23,7 +23,7 @@ class ProviderName(enum.StrEnum):
     OLLAMA = "ollama"
 
 
-_ENV_FIELDS: dict[str, str] = {
+ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_PROVIDER": "llm_provider",
     "GITCOMMIT_AI_MODEL": "llm_model",
     "GITCOMMIT_AI_TEMPERATURE": "llm_temperature",
@@ -131,7 +131,7 @@ class GitCommitAIConfig(BaseModel):
         Raises:
             ConfigurationError: If a variable holds an invalid value.
         """
-        values = {field: env[var] for var, field in _ENV_FIELDS.items() if env.get(var)}
+        values = {field: env[var] for var, field in ENV_FIELDS.items() if env.get(var)}
         try:
             return cls.model_validate(values)
         except ValidationError as exc:
@@ -143,4 +143,4 @@ class GitCommitAIConfig(BaseModel):
 
 def _env_var_for(field: str) -> str:
     """Return the environment variable that populates a config field."""
-    return next((var for var, name in _ENV_FIELDS.items() if name == field), field)
+    return next((var for var, name in ENV_FIELDS.items() if name == field), field)

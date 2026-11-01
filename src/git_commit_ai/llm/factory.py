@@ -65,6 +65,16 @@ _BACKENDS: dict[ProviderName, _BackendSpec] = {
 }
 
 
+def default_model(provider: ProviderName) -> str:
+    """Model used when none is configured for ``provider``."""
+    return _BACKENDS[provider].default_model
+
+
+def api_key_variable(provider: ProviderName) -> str | None:
+    """Environment variable holding ``provider``'s API key, or ``None`` if it needs none."""
+    return _BACKENDS[provider].key_env_var
+
+
 def create_provider(
     config: GitCommitAIConfig,
     env: Mapping[str, str] | None = None,
