@@ -16,12 +16,15 @@ jobs:
   lint:
     name: Ruff
     runs-on: ubuntu-latest
+    env:
+      # Overrides .python-version (the developer default) for every uv command in the job.
+      UV_PYTHON: "3.13"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --all-extras --python 3.13
+      - run: uv sync --all-extras
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
@@ -32,19 +35,29 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+    env:
+      # Without this, `uv run` follows .python-version (3.14) and silently rebuilds the
+      # environment, so every matrix job would test the same interpreter.
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       # All extras: the only non-empty one is keyring, whose store has tests.
-      - run: uv sync --all-extras --python ${{ matrix.python-version }}
+      - run: uv sync --all-extras
+      - name: Show the Python in use, and fail if it is not the matrix version
+        run: |
+          uv run python -VV
+          uv run python -c "import sys; v = '%d.%d' % sys.version_info[:2]; assert v == '${{ matrix.python-version }}', f'expected ${{ matrix.python-version }}, got {v}'"
       - run: uv run mypy src tests scripts
       - run: uv run pytest
 
   package:
     name: Build and install
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.13"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
