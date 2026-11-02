@@ -162,9 +162,7 @@ class KeyringCredentialStore:
                     "The system keychain isn't available. Install gitcommit-ai[keyring], "
                     "or set credential_store back to file with git ai-commit config set."
                 )
-            import keyring
-
-            backend = keyring
+            backend = keyring_backend()
         self._backend = backend
 
     def __repr__(self) -> str:
@@ -199,6 +197,13 @@ class KeyringCredentialStore:
             raise ConfigurationError(
                 f"The system keychain failed ({type(exc).__name__})."
             ) from None
+
+
+def keyring_backend() -> _KeyringBackend:
+    """The ``keyring`` module itself; call only after ``keyring_available()``."""
+    import keyring
+
+    return keyring
 
 
 def keyring_available() -> bool:

@@ -10,13 +10,15 @@ Provides commands for Git intelligence and repository context:
     - ``config``: Show the effective settings and their sources.
     - ``hook``: Install or remove the prepare-commit-msg hook.
     - ``setup``, ``provider``, ``model``, ``key``, ``mode``: Change the saved setup.
+    - ``reset``, ``doctor``: Remove the saved setup, or check it against the provider.
 """
 
 from __future__ import annotations
 
 import typer
 
-from git_commit_ai.cli.config_cmd import config
+from git_commit_ai.cli.config_cmd import config_app, reset
+from git_commit_ai.cli.doctor import doctor
 from git_commit_ai.cli.generate import generate
 from git_commit_ai.cli.hook import hook_app
 from git_commit_ai.cli.setup_cmds import key, mode, model, provider, setup
@@ -37,9 +39,9 @@ app = typer.Typer(
 
 
 app.command()(generate)
-app.command()(config)
+app.add_typer(config_app, name="config")
 app.add_typer(hook_app, name="hook")
-for _command in (setup, provider, model, key, mode):
+for _command in (setup, provider, model, key, mode, reset, doctor):
     app.command()(_command)
 
 

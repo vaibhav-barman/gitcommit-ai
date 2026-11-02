@@ -359,7 +359,10 @@ class TestModelCommand:
         assert saved is not None
         assert saved.provider is ProviderName.ANTHROPIC
         assert saved.preferences(ProviderName.ANTHROPIC).model == "claude-opus-5-5"
-        assert "Saved. Model for anthropic: claude-opus-5-5 (not tested" in result.stderr
+        assert (
+            "Saved. Model for anthropic: claude-opus-5-5 (run `git ai-commit doctor` to test it)"
+            in result.stderr
+        )
 
     def test_another_provider_can_be_named(self, isolated_user_config: Path) -> None:
         result = runner.invoke(

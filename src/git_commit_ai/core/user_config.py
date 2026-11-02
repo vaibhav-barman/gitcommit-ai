@@ -113,6 +113,32 @@ def load_user_config(directory: Path) -> UserConfig | None:
         ) from exc
 
 
+def unknown_keys(directory: Path) -> list[str]:
+    """Dotted names in ``config.toml`` that this version does not read, sorted."""
+    data = read_toml(directory / CONFIG_FILE) or {}
+    found: list[str] = []
+    for key, value in data.items():
+        if key == "providers" and isinstance(value, dict):
+            for name, table in value.items():
+                if name not in {p.value for p in ProviderName}:
+                    found.append(f"providers.{name}")
+                elif isinstance(table, dict):
+                    found += [
+                        f"providers.{name}.{field}"
+                        for field in table
+                        if field not in ProviderPreferences.model_fields
+                    ]
+        elif key == "generation" and isinstance(value, dict):
+            found += [
+                f"generation.{field}"
+                for field in value
+                if field not in GenerationOverrides.model_fields
+            ]
+        elif key not in UserConfig.model_fields:
+            found.append(key)
+    return sorted(found)
+
+
 def save_user_config(directory: Path, config: UserConfig) -> Path:
     """Write ``config`` to ``directory/config.toml`` atomically and return the path.
 

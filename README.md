@@ -201,6 +201,10 @@ flowchart LR
 | `git ai-commit key` | Replace a provider's key (hidden input, checked before saving). `git ai-commit key --stdin` reads it from a pipe; `--provider` picks whose key |
 | `git ai-commit mode` | Choose what happens once a message is ready: `preview`, `confirm` or `auto`. `git ai-commit mode NAME` saves one without asking |
 | `git-ai-commit config` | Show every setting, where it came from, and API keys masked to their last four characters |
+| `git ai-commit config get KEY` / `config set KEY VALUE` / `config unset KEY` | Read the effective value of a setting, or save or remove it in `config.toml`. Keys are the variable names without `GITCOMMIT_AI_`, lowercased (`temperature`, `model`, `commit_mode`, `ollama_url`, ...), plus `credential_store` (`file` or `keyring`, which moves saved keys). `model` takes `--provider`. API keys are refused: use `key` |
+| `git ai-commit config path` | Print where `config.toml` lives |
+| `git ai-commit reset` | Remove the saved config, credentials file and keychain entries after listing them (`--yes` skips the question and is required without a terminal). Environment variables and `.env` files are not touched |
+| `git ai-commit doctor` | Show the provider, model and key in effect, then check the key, that the model is listed, and send one tiny test request (`--no-request` skips it). Exits 1 if a check fails, and says what to run |
 | `git-ai-commit hook install` / `hook uninstall` | Manage the `prepare-commit-msg` hook (both accept `--path`) |
 | `gitcommit-ai inspect` | Repository root, branch, detached `HEAD`, staged, unstaged and untracked files (`--path`) |
 | `gitcommit-ai diff` | Diff statistics for staged changes (`--unstaged`, `--path`) |
@@ -208,7 +212,7 @@ flowchart LR
 | `gitcommit-ai context` | Detected convention, style profile and evidence (`--count`, `--path`) |
 | `gitcommit-ai examples` | Historical commits relevant to your change, with reasons (`--max-examples`, `--unstaged`, `--path`) |
 
-`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `setup`, `provider`, `model`, `key`, `mode`, `config` and `hook`.
+`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `setup`, `provider`, `model`, `key`, `mode`, `config`, `reset`, `doctor` and `hook`.
 
 </details>
 

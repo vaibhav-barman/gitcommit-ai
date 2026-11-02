@@ -28,6 +28,9 @@ No version has been released yet; everything below is under **Unreleased**.
   request) and commit mode. Without a terminal it explains instead, and the hook only prints a
   note. New commands `setup`, `provider`, `model` and `key` (each with a form that never asks:
   `provider NAME`, `model NAME`, `key --stdin`), on both `gitcommit-ai` and `git ai-commit`.
+- `config get/set/unset/path` to read and change saved settings (API keys are refused), `reset`
+  to remove the saved setup, and `doctor` to check the provider, key and model in effect (exit
+  code 1 on any failure). `config` alone still shows the effective settings.
 - Clearer provider errors: a rejected key names where it came from and how to replace it, and a
   retired model points to `git ai-commit model`.
 

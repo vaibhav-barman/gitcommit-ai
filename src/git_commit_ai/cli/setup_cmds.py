@@ -99,8 +99,7 @@ def model(
         if name is not None:
             update_config(lambda config: _with_model(config, target, name))
             _note(
-                f"Saved. Model for {target.value}: {name} (not tested; run "
-                "`git ai-commit model` without a name to pick from the list and test it)"
+                f"Saved. Model for {target.value}: {name} (run `git ai-commit doctor` to test it)"
             )
         else:
             interaction = _terminal(ctx, "model needs a terminal, or pass a model name.")

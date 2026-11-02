@@ -22,6 +22,7 @@ from git_commit_ai.core.user_config import (
     atomic_write,
     load_user_config,
     save_user_config,
+    unknown_keys,
 )
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
@@ -155,3 +156,23 @@ def test_atomic_write_replaces_the_contents(tmp_path: Path) -> None:
     path.write_text("old\n", encoding="utf-8")
     atomic_write(path, "new\n", 0o644)
     assert path.read_text(encoding="utf-8") == "new\n"
+
+
+def test_unknown_keys_are_listed_with_their_tables(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        'provider = "openai"\ncolour = "blue"\n[providers.openai]\nmodel = "m"\nspeed = 1\n'
+        "[providers.future]\nmodel = 'x'\n[generation]\ntemperature = 0.5\nseed = 1\n"
+        "[extra]\na = 1\n",
+    )
+    assert unknown_keys(tmp_path) == [
+        "colour",
+        "extra",
+        "generation.seed",
+        "providers.future",
+        "providers.openai.speed",
+    ]
+
+
+def test_no_file_has_no_unknown_keys(tmp_path: Path) -> None:
+    assert unknown_keys(tmp_path) == []

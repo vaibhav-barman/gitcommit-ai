@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import typer
 
-from git_commit_ai.cli.config_cmd import config
+from git_commit_ai.cli.config_cmd import config_app, reset
+from git_commit_ai.cli.doctor import doctor
 from git_commit_ai.cli.generate import generate
 from git_commit_ai.cli.hook import hook_app
 from git_commit_ai.cli.setup_cmds import key, mode, model, provider, setup
@@ -20,9 +21,9 @@ git_app = typer.Typer(
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 git_app.callback(invoke_without_command=True)(generate)
-git_app.command("config")(config)
+git_app.add_typer(config_app, name="config")
 git_app.add_typer(hook_app, name="hook")
-for _command in (setup, provider, model, key, mode):
+for _command in (setup, provider, model, key, mode, reset, doctor):
     git_app.command()(_command)
 
 
