@@ -10,11 +10,15 @@ import pytest
 from typer.testing import CliRunner
 
 from git_commit_ai.cli.git_subcommand import git_ai_commit
+from git_commit_ai.cli.interaction import Interaction
 from git_commit_ai.cli.main import app
 from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
+from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
+from git_commit_ai.core.settings import ENV_FILE_VARIABLE
+from git_commit_ai.core.user_config import UserConfig, save_user_config
 from git_commit_ai.llm import FakeLLM
 from git_commit_ai.llm.retry import RetryEvent
-from tests.fixtures.cli import use_llm
+from tests.fixtures.cli import plain, use_llm
 from tests.fixtures.git_repo import (
     commit_count,
     diverged_repo,
@@ -27,6 +31,7 @@ from tests.fixtures.git_repo import (
     stage_file,
     start_operation,
 )
+from tests.fixtures.prompter import ScriptedPrompter
 from tests.fixtures.scripted_llm import scripted_llm
 
 if TYPE_CHECKING:
@@ -64,8 +69,12 @@ def staged_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _generate(repo: Path, *args: str, stdin: str | None = None) -> Result:
-    return runner.invoke(app, ["generate", "--path", str(repo), *args], input=stdin)
+def _generate(repo: Path, *args: str, answers: ScriptedPrompter | None = None) -> Result:
+    """Run ``generate``; with ``answers`` the run is interactive and answers from them."""
+    obj = None
+    if answers is not None:
+        obj = Interaction(interactive=True, prompter_factory=lambda: answers)
+    return runner.invoke(app, ["generate", "--path", str(repo), *args], obj=obj)
 
 
 class TestOutput:
@@ -156,9 +165,13 @@ class TestDegradation:
         assert result.stdout.strip() == ""
 
     def test_retries_are_announced(
-        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch, isolated_user_config: Path
     ) -> None:
-        def announce(config: GitCommitAIConfig, on_retry: object = None, **_: object) -> FakeLLM:
+        save_user_config(isolated_user_config, UserConfig())
+
+        def announce(
+            config: GitCommitAIConfig, api_key: str | None, on_retry: object = None
+        ) -> FakeLLM:
             assert callable(on_retry)
             on_retry(RetryEvent("openai", 1, 3, 2.0, RateLimitError("openai")))
             return scripted_llm([GOOD])
@@ -210,14 +223,16 @@ class TestDegradation:
     def test_without_yes_an_interrupted_draft_goes_to_the_prompt(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "FAKE-" + "g" * 24)
         use_llm(monkeypatch, scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")}))
         before = commit_count(staged_repo)
 
-        result = _generate(staged_repo, "--accept-partial", stdin="n\n")
+        prompter = ScriptedPrompter([False])
+        result = _generate(staged_repo, "--accept-partial", answers=prompter)
 
         assert result.exit_code == 1
         assert commit_count(staged_repo) == before
-        assert "Commit with this message?" in result.stderr
+        assert prompter.messages() == ["Commit with this message?"]
 
     def test_dry_run_with_yes_is_not_an_error_for_an_interrupted_draft(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -487,9 +502,10 @@ class TestCommitting:
         assert "Committed" in result.stderr
 
     def test_confirming_commits(self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "FAKE-" + "g" * 24)
         use_llm(monkeypatch, scripted_llm([GOOD]))
 
-        result = _generate(staged_repo, stdin="y\n")
+        result = _generate(staged_repo, answers=ScriptedPrompter([True]))
 
         assert result.exit_code == 0
         assert head_message(staged_repo) == GOOD
@@ -497,10 +513,11 @@ class TestCommitting:
     def test_declining_aborts_without_committing(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "FAKE-" + "g" * 24)
         use_llm(monkeypatch, scripted_llm([GOOD]))
         before = commit_count(staged_repo)
 
-        result = _generate(staged_repo, stdin="n\n")
+        result = _generate(staged_repo, answers=ScriptedPrompter([False]))
 
         assert result.exit_code == 1
         assert commit_count(staged_repo) == before
@@ -636,7 +653,10 @@ class TestConfiguration:
         assert seen[0].llm_provider.value == "anthropic"
         assert seen[0].max_iterations == 4
 
-    def test_missing_api_key_names_the_variable(self, staged_repo: Path) -> None:
+    def test_missing_api_key_names_the_variable(
+        self, staged_repo: Path, isolated_user_config: Path
+    ) -> None:
+        save_user_config(isolated_user_config, UserConfig())
         result = _generate(staged_repo, "--dry-run", "--provider", "openai")
 
         assert result.exit_code == 1
@@ -664,16 +684,44 @@ class TestGitSubcommand:
         with pytest.raises(SystemExit) as info:
             git_ai_commit()
         assert info.value.code == 0
-        assert "--dry-run" in capsys.readouterr().out
+        assert "--dry-run" in plain(capsys.readouterr().out)
 
-    def test_runs_generate_directly_without_a_subcommand_name(self, staged_repo: Path) -> None:
-        launcher = "from git_commit_ai.cli.git_subcommand import git_ai_commit; git_ai_commit()"
-        completed = subprocess.run(
-            [sys.executable, "-c", launcher, "--path", str(staged_repo), "--provider", "openai"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env={"PATH": "/usr/bin:/bin"},
+    def test_runs_generate_directly_without_a_subcommand_name(
+        self, staged_repo: Path, tmp_path: Path
+    ) -> None:
+        completed = _launch_git_ai_commit(
+            tmp_path, "--path", str(staged_repo), "--provider", "openai"
         )
         assert completed.returncode == 1
         assert "OPENAI_API_KEY" in completed.stderr
+
+    def test_a_fresh_process_with_nothing_set_up_explains_instead_of_prompting(
+        self, staged_repo: Path, tmp_path: Path
+    ) -> None:
+        completed = _launch_git_ai_commit(tmp_path, "--path", str(staged_repo))
+        assert completed.returncode == 1
+        assert "No provider is set up. Run `git ai-commit setup`" in completed.stderr
+        assert list((tmp_path / "home").iterdir()) == []
+
+
+def _launch_git_ai_commit(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run ``git ai-commit`` in a fresh process that sees nothing of the developer's machine:
+    an empty HOME and XDG config directory, an empty gitcommit-ai config directory, no
+    ``.env``, no provider variables and no terminal."""
+    home = tmp_path / "home"
+    home.mkdir()
+    launcher = "from git_commit_ai.cli.git_subcommand import git_ai_commit; git_ai_commit()"
+    return subprocess.run(
+        [sys.executable, "-c", launcher, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            CONFIG_DIR_VARIABLE: str(home / "gitcommit-ai"),
+            ENV_FILE_VARIABLE: "",
+        },
+    )

@@ -206,7 +206,7 @@ def test_invalid_dotenv_value_names_the_variable(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("secret", "masked"),
-    [("", ""), ("abc", "***"), ("sevench", "*******"), ("sk-abcdefgh1234", "********1234")],
+    [("", ""), ("abc", "***"), ("sevench", "*******"), ("xx-abcdefgh1234", "********1234")],
 )
 def test_mask_secret_never_reveals_more_than_the_tail(secret: str, masked: str) -> None:
     assert mask_secret(secret) == masked

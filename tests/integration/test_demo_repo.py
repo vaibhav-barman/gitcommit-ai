@@ -24,12 +24,23 @@ DEFAULT_DEMO_DIR = "/tmp/gitcommit-ai-demo"
 
 @pytest.fixture(scope="module")
 def demo_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    target = tmp_path_factory.mktemp("demo") / "demo"
+    base = tmp_path_factory.mktemp("demo")
+    target = base / "demo"
+    home = base / "home"
+    home.mkdir()
+    # An empty HOME keeps the developer's global Git config (hooks, signing) and any saved
+    # gitcommit-ai setup out of the script.
     subprocess.run(
         ["bash", str(PREPARE)],
         check=True,
         capture_output=True,
-        env={**os.environ, "DEMO_DIR": str(target)},
+        env={
+            **os.environ,
+            "DEMO_DIR": str(target),
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            "GITCOMMIT_AI_CONFIG_DIR": str(home / "gitcommit-ai"),
+        },
     )
     return target
 

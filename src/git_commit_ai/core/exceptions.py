@@ -52,6 +52,36 @@ class ConfigurationError(GitCommitAIError):
     """Raised when configuration values or environment variables are invalid."""
 
 
+class UnsupportedConfigVersionError(ConfigurationError):
+    """Raised when writing a config file that a newer version of the tool created."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"{path} was written by a newer gitcommit-ai, so it is not changed. "
+            "Upgrade gitcommit-ai, or run git ai-commit reset."
+        )
+        self.path = path
+
+
+class SetupRequiredError(GitCommitAIError):
+    """Raised when a run needs a provider, none is set up, and there is no terminal to
+    set one up in."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No provider is set up. Run `git ai-commit setup` in a terminal, or set\n"
+            "GITCOMMIT_AI_PROVIDER and that provider's key variable (for example "
+            "ANTHROPIC_API_KEY)."
+        )
+
+
+class SetupCancelledError(GitCommitAIError):
+    """Raised when the user leaves setup (Ctrl+C, Ctrl+D, end of input, or "Cancel")."""
+
+    def __init__(self) -> None:
+        super().__init__("Setup cancelled; nothing was saved.")
+
+
 class LLMError(GitCommitAIError):
     """Base exception for failures originating from an LLM provider."""
 
@@ -61,23 +91,49 @@ class MissingAPIKeyError(LLMError):
 
     def __init__(self, provider: str, env_var: str) -> None:
         super().__init__(
-            f"No API key for provider '{provider}'. Set the {env_var} environment variable."
+            f"No API key for {provider}. Run `git ai-commit key`, "
+            f"or set the {env_var} environment variable."
         )
         self.provider = provider
         self.env_var = env_var
 
 
-class ProviderNotInstalledError(LLMError):
-    """Raised when the SDK for a selected provider is not installed."""
+class AuthenticationError(LLMError):
+    """Raised when a provider rejects the API key (or the key lacks a permission).
 
-    def __init__(self, provider: str, extra: str) -> None:
+    The message is fixed text: provider error bodies can echo the key back.
+    """
+
+    def __init__(self, provider: str, status: int | None = None) -> None:
+        detail = f" (HTTP {status})" if status is not None else ""
+        super().__init__(f"{provider} rejected the API key{detail}.")
+        self.provider = provider
+        self.status = status
+
+
+class ModelNotAvailableError(LLMError):
+    """Raised when the provider does not serve the requested model."""
+
+    def __init__(self, provider: str, model: str) -> None:
         super().__init__(
-            f"The '{provider}' provider needs its SDK. "
-            f"Install it with: pip install 'gitcommit-ai[{extra}]' "
-            f"(installed with pipx? use: pipx install --force 'gitcommit-ai[{extra}]')"
+            f"{model} isn't available from {provider} (it may have been retired or renamed)."
         )
         self.provider = provider
-        self.extra = extra
+        self.model = model
+
+
+class RequestRejectedError(LLMError):
+    """Raised when a provider refuses a request for a reason other than auth or the model.
+
+    ``param`` is the request field the provider blamed, when it names one.
+    """
+
+    def __init__(self, provider: str, status: int, message: str, param: str | None) -> None:
+        detail = f": {message}" if message else ""
+        super().__init__(f"{provider} request failed (HTTP {status}){detail}")
+        self.provider = provider
+        self.status = status
+        self.param = param
 
 
 class OllamaUnreachableError(LLMError):

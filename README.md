@@ -75,59 +75,42 @@ Diagnostics go to stderr and the message goes to stdout, so `git ai-commit --dry
 | **Bodies** | A body wrapped at 72 columns when at least half of recent commits have one, or the diff is large |
 | **`--hint`** | Tell it what the change is for; the message must still match the diff |
 | **`--amend`, `--no-verify`** | Reword or extend the last commit; skip pre-commit and commit-msg hooks |
+| **Guided setup** | The first run asks for a provider, key, model and commit mode, checking each answer live with the provider; keys are stored privately, never in the config file |
 | **Commit hook** | `hook install` makes plain `git commit` open your editor with a proposal; existing hooks are backed up and chained |
 | **Safe states** | Refuses mid-merge, cherry-pick or revert; notes a rebase; warns on a detached `HEAD` |
-| **Providers** | OpenAI, Anthropic, Gemini, and Ollama behind one small protocol |
+| **Providers** | Anthropic, Google Gemini, Hugging Face, OpenAI, OpenRouter and Ollama (local or remote) over plain HTTP, behind one small protocol |
 
 ## Quick start
 
-**1. Install.** The package is not on PyPI yet, so install from a clone. Pick the provider extra you need (`openai`, `anthropic`, `gemini`, `ollama`, or `all`).
-
 ```bash
-git clone https://github.com/vaibhav-barman/gitcommit-ai.git
-cd gitcommit-ai
-pipx install ".[openai]"
+git clone https://github.com/vaibhav-barman/gitcommit-ai.git && cd gitcommit-ai
+pipx install .              # or: uv tool install . / pip install .
+cd /path/to/your/repo && git add -p
+git ai-commit               # the first run asks for a provider, key, model and commit mode
 ```
 
-**2. Set a provider key.** Ollama needs none.
+The package is not on PyPI yet, so it installs from a clone. Every provider works out of the box; there is nothing extra to install. The first run checks your key with the provider, lists the models that key can use, and sends one tiny test request before saving anything. Change any of it later with `git ai-commit setup`, or see [Configuration](#reference) in the reference.
+
+Everyday use:
 
 ```bash
-export OPENAI_API_KEY=sk-...
-```
-
-A `.env` file in the current directory or the repository root works too; see the configuration section of the [reference](#reference).
-
-**3. First run.** Stage a change in any repository and preview the message without committing.
-
-```bash
-cd /path/to/your/repo
-git add -p
-git ai-commit --dry-run
-```
-
-**4. Optional: let plain `git commit` propose a message.**
-
-```bash
-git-ai-commit hook install
-git commit
-```
-
-**5. Everyday use.**
-
-```bash
-git ai-commit                                   # print, confirm, commit
+git ai-commit                                   # print, then ask before committing (the default mode)
+git ai-commit --dry-run                         # print only
 git ai-commit --hint "fixes the flaky retry test"
 git ai-commit --amend                           # reword the last commit
+git-ai-commit hook install                      # let plain `git commit` propose a message
 ```
 
 ### Providers
 
-| Provider | Extra | API key variable | Default model |
-|---|---|---|---|
-| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
-| Gemini | `gemini` | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
-| Ollama | `ollama` | none (local server) | `llama3.1` |
+| Provider | Name | Key variable | Default model (environment-only setups) | Get a key |
+|---|---|---|---|---|
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| Google Gemini | `gemini` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | `gemini-2.5-flash` | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| Hugging Face | `huggingface` | `HF_TOKEN` | `deepseek-ai/DeepSeek-V4.1-Flash` | [a fine-grained token](https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained) with "Make calls to Inference Providers" |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com/api-keys) |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-5.5` | [openrouter.ai](https://openrouter.ai/settings/keys) |
+| Ollama | `ollama` | none for a local server; `OLLAMA_API_KEY` for Ollama Cloud or a protected server | `llama3.1` | [ollama.com](https://ollama.com/settings/keys) (cloud only) |
 
 Choose one with `--provider` and `--model`, or with `GITCOMMIT_AI_PROVIDER` and `GITCOMMIT_AI_MODEL`.
 
@@ -156,11 +139,13 @@ The graph runs on [LangGraph](https://github.com/langchain-ai/langgraph). Everyt
 flowchart LR
     cli["cli"] --> agents["agents"]
     cli --> git["git"]
+    cli --> onboarding["onboarding"]
     agents --> context["context"]
     agents --> llm["llm"]
     context --> core["core"]
     git --> core
     llm --> core
+    onboarding --> llm
 ```
 
 [`docs/architecture.md`](docs/architecture.md) has the state schema, node contracts, critic rules and design decisions.
@@ -176,10 +161,11 @@ flowchart LR
 
 | Flag | Meaning |
 |---|---|
-| `--provider` | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `--provider` | `openai`, `anthropic`, `gemini`, `openrouter`, `huggingface`, or `ollama` |
 | `--model`, `-m` | Model name (default: the provider's default) |
 | `--dry-run` | Print the message and exit without committing |
 | `--yes`, `-y` | Commit without the confirmation prompt; refused if a provider error cut the run short |
+| `--confirm` | Ask before committing, even when the commit mode is `auto` (cannot be combined with `--yes`) |
 | `--accept-partial` | Let `--yes` commit a draft left unfinished by a provider error |
 | `--max-iterations` | Cap on generate/critique rounds (1–10) |
 | `--hint "text"` | What the change is for, in your own words (up to 1000 characters) |
@@ -190,7 +176,16 @@ flowchart LR
 
 | Command | What it does |
 |---|---|
+| `git ai-commit setup` | Choose a provider, key, model and commit mode; every answer is checked with the provider. Runs by itself the first time `git ai-commit` has nothing set up and a terminal is attached |
+| `git ai-commit provider` | Switch provider (keys and models saved for others are kept). `git ai-commit provider NAME` saves one without asking |
+| `git ai-commit model` | Pick a model from the provider's live list, then send one tiny test request. `git ai-commit model NAME` saves one without listing or testing; `--provider` changes another provider's model |
+| `git ai-commit key` | Replace a provider's key (hidden input, checked before saving). `git ai-commit key --stdin` reads it from a pipe; `--provider` picks whose key |
+| `git ai-commit mode` | Choose what happens once a message is ready: `preview`, `confirm` or `auto`. `git ai-commit mode NAME` saves one without asking |
 | `git-ai-commit config` | Show every setting, where it came from, and API keys masked to their last four characters |
+| `git ai-commit config get KEY` / `config set KEY VALUE` / `config unset KEY` | Read the effective value of a setting, or save or remove it in `config.toml`. Keys are the variable names without `GITCOMMIT_AI_`, lowercased (`temperature`, `model`, `commit_mode`, `ollama_url`, ...), plus `credential_store` (`file` or `keyring`, which moves saved keys). `model` takes `--provider`. API keys are refused: use `key` |
+| `git ai-commit config path` | Print where `config.toml` lives |
+| `git ai-commit reset` | Remove the saved config, credentials file and keychain entries after listing them (`--yes` skips the question and is required without a terminal). Environment variables and `.env` files are not touched |
+| `git ai-commit doctor` | Show the provider, model and key in effect, then check the key, that the model is listed, and send one tiny test request (`--no-request` skips it). Exits 1 if a check fails, and says what to run |
 | `git-ai-commit hook install` / `hook uninstall` | Manage the `prepare-commit-msg` hook (both accept `--path`) |
 | `gitcommit-ai inspect` | Repository root, branch, detached `HEAD`, staged, unstaged and untracked files (`--path`) |
 | `gitcommit-ai diff` | Diff statistics for staged changes (`--unstaged`, `--path`) |
@@ -198,7 +193,7 @@ flowchart LR
 | `gitcommit-ai context` | Detected convention, style profile and evidence (`--count`, `--path`) |
 | `gitcommit-ai examples` | Historical commits relevant to your change, with reasons (`--max-examples`, `--unstaged`, `--path`) |
 
-`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `config` and `hook`.
+`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `setup`, `provider`, `model`, `key`, `mode`, `config`, `reset`, `doctor` and `hook`.
 
 </details>
 
@@ -207,36 +202,91 @@ flowchart LR
 
 <br>
 
-Settings are resolved in this order, highest priority first:
+**Where settings live.** `git ai-commit setup` (or the first run) saves your answers in a per-user config directory, outside every repository:
 
-1. **Command-line flags** (`--provider`, `--model`, `--max-iterations`)
-2. **Environment variables**
-3. **A `.env` file**, read from the current directory or, failing that, the root of the Git repository. Parent directories above the repository root and your home directory are never searched
-4. **Defaults**
+| System | Directory |
+|---|---|
+| macOS, Linux | `~/.config/gitcommit-ai` (or `$XDG_CONFIG_HOME/gitcommit-ai` when that is an absolute path) |
+| Windows | `%APPDATA%\gitcommit-ai` |
+| Anywhere | `GITCOMMIT_AI_CONFIG_DIR`, if set |
 
-The `.env` file is parsed into memory only and never exported into the process environment. Blank values count as unset. Set `GITCOMMIT_AI_ENV_FILE` to use a specific file, or to an empty string to skip `.env` loading. [`.env.example`](.env.example) is a template. `git-ai-commit config` shows what is in effect:
+`config.toml` holds settings and never a key, so it is safe to show or share; `git ai-commit config path` prints its location:
+
+```toml
+schema_version = 1
+provider = "anthropic"
+commit_mode = "confirm"           # preview | confirm | auto
+credential_store = "file"         # file | keyring
+
+[providers.anthropic]
+model = "claude-sonnet-5-5"
+
+[providers.ollama]
+base_url = "http://localhost:11434"
+
+[generation]                      # written only by `config set`
+temperature = 0.3
+```
+
+Keys go in `credentials.toml` next to it, created readable only by you (mode 0600; on Windows it inherits the per-user permissions of `%APPDATA%`). A warning appears if its permissions are ever widened. To use the system keychain instead, install the `keyring` extra (`pipx install ".[keyring]"`) and choose it during setup, or run `git ai-commit config set credential_store keyring`, which moves saved keys. The keychain is opt-in because it can show a permission dialog, which would pause `git commit` through the hook. `git ai-commit reset` removes all of it.
+
+**Precedence**, highest first:
+
+```text
+settings:  flags   >  environment  >  .env (cwd, then repo root)  >  config.toml  >  built-in default
+model:     --model >  GITCOMMIT_AI_MODEL (env, .env)  >  model saved for the effective provider  >  provider default
+API key:   the provider's key variable (env, then .env)  >  saved key
+commit:    --dry-run / --yes / --confirm  >  GITCOMMIT_AI_COMMIT_MODE (env, .env)  >  commit_mode  >  confirm
+```
+
+A model is saved per provider, so switching providers and back restores the model you had, and a model saved for one provider is never sent to another. Setups configured entirely through environment variables, CI included, behave as they always did: they have no config file, and setup never starts for them.
+
+`git-ai-commit config` shows what is in effect and where each value came from:
 
 ```text
 $ git-ai-commit config
 Effective settings
-  Precedence: flags > environment > .env > defaults
+  Precedence: flags > environment > .env > config file > defaults
   .env file:  none found
+  Config file: ~/.config/gitcommit-ai/config.toml
 
-  GITCOMMIT_AI_PROVIDER          openai                           [default]
-  GITCOMMIT_AI_MODEL             (provider default: gpt-4o-mini)  [default]
+  GITCOMMIT_AI_PROVIDER          anthropic                        [config file]
+  GITCOMMIT_AI_MODEL             claude-sonnet-5-5                [config file]
   GITCOMMIT_AI_TEMPERATURE       0.3                              [default]
   ...
 
 API keys
-  openai    OPENAI_API_KEY = not set
-  anthropic ANTHROPIC_API_KEY = not set
-  gemini    GOOGLE_API_KEY = not set
-  ollama    no key needed
+  openai      OPENAI_API_KEY = not set
+  anthropic   ANTHROPIC_API_KEY = ********a91c  [credentials file]
+  ...
 ```
+
+**Commit modes.**
+
+| Mode | What happens once the message is ready |
+|---|---|
+| `confirm` (default) | Ask before committing. Without a terminal it never asks: it prints the message and exits with code 1 |
+| `preview` | Print the message only |
+| `auto` | Commit without asking (setup offers it only as an explicit choice); an interrupted run still needs `--accept-partial` |
+
+`--dry-run`, `--yes` and `--confirm` override the mode for one run. The commit hook ignores it: the hook only proposes a message.
+
+**Windows.** Menus work in Windows Terminal, PowerShell and cmd. In Git Bash (mintty) the arrow-key menus cannot start, so setup falls back to numbered prompts; Windows Terminal is recommended.
+
+</details>
+
+<details>
+<summary><b>Using environment variables (CI, scripts)</b></summary>
+
+<br>
+
+Every setting has a variable, and variables beat the saved config. A `.env` file in the current directory or, failing that, the root of the Git repository works too; parent directories and your home directory are never searched. The `.env` file is parsed into memory only and never exported into the process environment. Blank values count as unset. [`.env.example`](.env.example) is a template; most people never need it.
+
+Key variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (or `GEMINI_API_KEY`), `OPENROUTER_API_KEY`, `HF_TOKEN` and `OLLAMA_API_KEY` (Ollama Cloud or a protected server only). Without a terminal, nothing ever prompts: with nothing set up, `git ai-commit` exits with code 1 and says to run `git ai-commit setup` or set `GITCOMMIT_AI_PROVIDER` and a key variable. Passing `--provider` counts as a choice already made, so a run like `git ai-commit --provider openai` without a key names the missing variable (`OPENAI_API_KEY`) instead; in a terminal it asks for that key alone and offers to save it.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `GITCOMMIT_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `gemini`, or `ollama` |
+| `GITCOMMIT_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `gemini`, `openrouter`, `huggingface`, or `ollama` |
 | `GITCOMMIT_AI_MODEL` | provider default | Model name |
 | `GITCOMMIT_AI_TEMPERATURE` | `0.3` | Sampling temperature (0–2) |
 | `GITCOMMIT_AI_TIMEOUT` | `60` | Seconds per LLM request |
@@ -246,7 +296,9 @@ API keys
 | `GITCOMMIT_AI_RETRY_MAX_DELAY` | `30` | Longest wait before a retry; a longer `retry-after` is not waited out |
 | `GITCOMMIT_AI_MAX_ITERATIONS` | `3` | Generate/critique rounds (1–10) |
 | `GITCOMMIT_AI_MAX_DIFF_CHARS` | `24000` | Diff characters sent to the model (min 1000) |
+| `GITCOMMIT_AI_COMMIT_MODE` | `confirm` | `preview` (print only), `confirm` (ask first) or `auto` (commit without asking) |
 | `GITCOMMIT_AI_ENV_FILE` | none | A specific env file, or empty to skip `.env` loading |
+| `GITCOMMIT_AI_CONFIG_DIR` | per OS | Directory for the saved settings and keys (`config.toml`, `credentials.toml`); by default `~/.config/gitcommit-ai`, or `%APPDATA%\gitcommit-ai` on Windows |
 | `GITCOMMIT_AI_HOOK` | unset | Set to `0` to skip the commit hook for one commit |
 
 </details>
@@ -262,7 +314,8 @@ API keys
 - **Large diffs**: each file's patch gets a share of a character budget. Small patches stay whole, large ones are truncated at a line boundary, and files that do not fit are listed by name only. A notice tells you when this happened.
 - **No approved draft**: after `max_iterations` rounds the best draft is shown with the issues the critic still has.
 - **Retries and provider errors**: rate limits and transient errors are retried with backoff and announced on stderr. If a provider still fails after the first draft exists (during the critic or a later round), the best draft so far is shown with a yellow "Stopped early" warning. A failure before any draft exists is an error.
-- **`--yes` and interrupted runs**: if a provider error stopped the run early, `--yes` prints the draft, then exits with code 1 and commits nothing. Pass `--accept-partial` to allow it. A draft the critic merely did not approve after `max_iterations` rounds is still committed by `--yes`; the warning is on stderr.
+- **Commit modes**: `confirm` (the default) asks before committing, `preview` only prints the message, and `auto` commits without asking (offered by setup only as an explicit choice). Per run, `--dry-run` previews, `--yes` commits and `--confirm` asks, whatever the mode. Without a terminal, `confirm` never prompts: it prints the message and exits with code 1, so pass `--yes` or `--dry-run` in scripts. Piping `y` into the command no longer confirms. The commit hook ignores the mode; it only proposes a message.
+- **`--yes` and interrupted runs**: if a provider error stopped the run early, `--yes` (or `auto` mode) prints the draft, then exits with code 1 and commits nothing. Pass `--accept-partial` to allow it. A draft the critic merely did not approve after `max_iterations` rounds is still committed by `--yes`; the warning is on stderr.
 - **Bodies**: a short body, wrapped at 72 columns, is generated when at least half of the recent commits have one or the diff is large (6+ files or 200+ changed lines). Otherwise the message is a subject line only.
 - **`--hint`** steers the type and wording, but the message must still match the diff.
 - **`--amend`**: the message describes `HEAD` together with staged changes, and `HEAD` itself is not used as an example. If `HEAD` moved while generating, nothing is amended.
@@ -287,8 +340,10 @@ API keys
 | You see | Cause and fix |
 |---|---|
 | `Nothing is staged. Stage your changes first` | Run `git add` first; GitCommit AI never stages for you |
-| `No API key for provider 'openai'. Set the OPENAI_API_KEY environment variable.` | Export the key, or put it in a `.env` in the current directory or repository root. `git-ai-commit config` shows what was found and where |
-| `The 'openai' provider needs its SDK.` | Install the extra: `pipx install --force ".[openai]"` from your clone (or `pip install 'gitcommit-ai[openai]'` in a virtual environment) |
+| `No provider is set up.` | Run `git ai-commit setup` in a terminal, or set `GITCOMMIT_AI_PROVIDER` and that provider's key variable. The commit hook only prints a note |
+| `No API key for openai. Run git ai-commit key, or set the OPENAI_API_KEY environment variable.` | Run `git ai-commit key`, export the key, or put it in a `.env` in the current directory or repository root. `git-ai-commit config` shows what was found and where |
+| `... isn't available from openai (it may have been retired or renamed)` | Run `git ai-commit model` to pick a current model |
+| `OpenAI rejected the API key from ...` | The key is wrong, revoked, or lacks permission. The message names where the key came from: run `git ai-commit key` for a saved key, or update the variable |
 | `Could not reach Ollama at http://localhost:11434.` | Start it with `ollama serve`, or set `GITCOMMIT_AI_OLLAMA_URL` |
 | Yellow `Stopped early: ...` | A provider error cut the run short. The best draft is shown. Rerun, or commit it yourself; `--yes` needs `--accept-partial` |
 | `The staged changes changed while the message was being generated` | You staged or committed during generation. Nothing was committed; run it again |
@@ -307,11 +362,12 @@ API keys
 ```text
 gitcommit-ai/
 ├── src/git_commit_ai/
-│   ├── core/       config, settings (flags > env > .env), schemas, exceptions
+│   ├── core/       config, settings (flags > env > .env > config file), config dir, saved config and keys
 │   ├── git/        repository, diff, history, snapshots, committer, hook installer
 │   ├── context/    normalizer, convention detector, style analyzer, example selector, engine
-│   ├── llm/        provider protocol, factory, retry, FakeLLM, four backends
+│   ├── llm/        provider protocol, HTTP layer, factory, retry, FakeLLM, backends
 │   ├── agents/     state, analyst, retrieval, generator, critic rules and node, graph
+│   ├── onboarding/ setup wizard, prompt adapters (menus or plain numbered), model menus
 │   └── cli/        main app, generate, config, hook, git subcommand entry point
 ├── scripts/
 │   ├── eval/       evaluation harness (not installed)
@@ -344,14 +400,14 @@ uv run python -m scripts.eval /path/to/repo --provider anthropic -n 30      # a 
 ## Development
 
 ```bash
-uv sync --all-extras          # every provider SDK; the backend tests import them
+uv sync                       # no provider SDKs: every provider is plain HTTP
 uv run pytest                 # no network, no API keys
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src tests scripts # strict
 uv run python -m scripts.check_docs   # every flag, variable, path and link in the docs vs the code
 ```
 
-Tests run in temporary Git repositories and drive the agents with `FakeLLM` and mocked SDK clients. CI runs Ruff, mypy and the tests on Python 3.11, 3.12 and 3.13, plus a packaging smoke test. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md).
+Tests run in temporary Git repositories and drive the agents with `FakeLLM`; provider backends run against a fake HTTP transport, and any real network request fails the test. CI runs Ruff, mypy and the tests on Python 3.11, 3.12 and 3.13, plus a packaging smoke test. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## Roadmap
 
@@ -361,6 +417,7 @@ Tests run in temporary Git repositories and drive the agents with `FakeLLM` and 
 - [x] Hardening: retries, graceful degradation, `.env` and `config`, `--hint`, bodies, `--amend`, commit hook
 - [x] CI on Python 3.11–3.13, typed package, license, contributing guide, changelog
 - [x] Evaluation harness with an offline mode
+- [x] Guided onboarding: setup wizard, saved settings and keys, six providers over plain HTTP, commit modes
 - [ ] Record the demo GIF (`make demo`)
 - [ ] Publish live evaluation results
 - [ ] Publish to PyPI

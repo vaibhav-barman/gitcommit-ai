@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from git_commit_ai.core.exceptions import (
+    AuthenticationError,
     GitCommitAIError,
     LLMError,
     MissingAPIKeyError,
+    ModelNotAvailableError,
     OllamaUnreachableError,
-    ProviderNotInstalledError,
     RateLimitError,
 )
 
@@ -15,7 +16,8 @@ from git_commit_ai.core.exceptions import (
 def test_all_llm_errors_share_a_base() -> None:
     errors: list[LLMError] = [
         MissingAPIKeyError("openai", "OPENAI_API_KEY"),
-        ProviderNotInstalledError("openai", "openai"),
+        AuthenticationError("openai", 401),
+        ModelNotAvailableError("openai", "gpt-x"),
         OllamaUnreachableError("http://localhost:11434"),
         RateLimitError("anthropic"),
     ]
@@ -28,10 +30,14 @@ def test_missing_key_message_names_env_var() -> None:
     assert err.provider == "openai"
 
 
-def test_not_installed_message_gives_install_command() -> None:
-    message = str(ProviderNotInstalledError("gemini", "gemini"))
-    assert "pip install 'gitcommit-ai[gemini]'" in message
-    assert "pipx install --force 'gitcommit-ai[gemini]'" in message
+def test_auth_error_names_the_provider_and_status_only() -> None:
+    assert (
+        str(AuthenticationError("anthropic", 401)) == "anthropic rejected the API key (HTTP 401)."
+    )
+
+
+def test_model_error_names_the_model() -> None:
+    assert "gpt-x isn't available from openai" in str(ModelNotAvailableError("openai", "gpt-x"))
 
 
 def test_rate_limit_includes_retry_hint_when_known() -> None:

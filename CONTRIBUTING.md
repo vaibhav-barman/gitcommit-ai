@@ -10,11 +10,11 @@ You need Python 3.11 or newer, [uv](https://github.com/astral-sh/uv), and Git.
 ```bash
 git clone https://github.com/vaibhav-barman/gitcommit-ai.git
 cd gitcommit-ai
-uv sync --all-extras
+uv sync
 ```
 
-`--all-extras` installs every provider SDK. The backend tests import all of them (they are mocked,
-so no API keys or network access are needed).
+Providers are called over plain HTTP, so there are no SDKs to install. `uv sync --all-extras`
+also installs the optional `keyring` package, which the dev group already includes.
 
 ## Checks
 
@@ -63,9 +63,18 @@ Do not use syntax newer than 3.11 (for example PEP 695 `def f[T]()` generics or 
 
 ## Tests
 
-- **Never touch the network.** Use `FakeLLM` or the `scripted_llm` helper
-  (`tests/fixtures/scripted_llm.py`), which can also inject provider errors. Provider backends are
-  tested with mocked SDK clients.
+- **Never touch the network.** An autouse fixture makes any real HTTP request fail the test. Use
+  `FakeLLM` or the `scripted_llm` helper (`tests/fixtures/scripted_llm.py`), which can also inject
+  provider errors. Provider backends and model listings are tested against `FakeHttp`
+  (`tests/fixtures/http.py`), which answers canned responses per route and records every request.
+- **Never need a terminal.** The wizard and every command talk to a `Prompter`. Drive them with
+  `ScriptedPrompter` (`tests/fixtures/prompter.py`), which answers from a list, fails on an
+  unexpected or leftover prompt, and presses Ctrl+C with `CTRL_C`. CLI tests pass an
+  `Interaction` through `obj=` with the scripted prompter and a `FakeHttp` transport.
+- **Never touch your real config.** An autouse fixture points `GITCOMMIT_AI_CONFIG_DIR` at a
+  temporary directory and clears provider variables, so saved settings and keys stay out of tests.
+- **Never commit anything shaped like a real key.** Build fake keys at runtime (for example
+  `"FAKE-" + "a" * 20`); a test scans the repository for key-shaped strings.
 - **Use real temporary Git repositories** for anything that touches Git
   (`tests/fixtures/git_repo.py`). Never run Git against the working repository.
 - Put the tests in the same commit as the code they cover. New behavior needs tests for the
@@ -82,10 +91,12 @@ offline.
 
 ## Adding a provider
 
-Add `src/git_commit_ai/llm/<name>_provider.py` implementing `LLMProvider`, mapping SDK failures to
-`RateLimitError`, `TransientLLMError` (timeouts, connection drops, 5xx) or `LLMError`; register it
-in `llm/factory.py` and `ProviderName`; add an optional extra in `pyproject.toml`; and add mocked
-tests next to the existing backend tests.
+If the provider speaks the OpenAI chat-completions API, it only needs a base URL for
+`OpenAICompatibleBackend`. Otherwise add a small backend in `src/git_commit_ai/llm/` that sends its
+requests through `HttpClient` (`llm/http.py`), which already maps failures to `RateLimitError`,
+`TransientLLMError`, `AuthenticationError` and `ModelNotAvailableError`. Register it in
+`llm/factory.py` and `ProviderName`, add its key variable to `PROVIDER_KEY_VARIABLES`, and test it
+against `FakeHttp` next to the existing backend tests.
 
 ## Commits and pull requests
 

@@ -7,16 +7,28 @@ from typing import TYPE_CHECKING, NoReturn
 import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
+from git_commit_ai.cli.interaction import Interaction, current, run_wizard, setup_required
 from git_commit_ai.cli.settings_loader import load_cli_settings
-from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
-from git_commit_ai.core.exceptions import GitCommitAIError
+from git_commit_ai.cli.setup_cmds import report_setup
+from git_commit_ai.core.config import CommitMode, ProviderName
+from git_commit_ai.core.exceptions import (
+    AuthenticationError,
+    GitCommitAIError,
+    ModelNotAvailableError,
+    SetupCancelledError,
+    SetupRequiredError,
+)
 from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
+from git_commit_ai.core.settings import Settings, SettingSource
 from git_commit_ai.git.committer import GitCommitter
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
 from git_commit_ai.git.repository import RepositoryInspector
 from git_commit_ai.git.snapshots import SnapshotManager
 from git_commit_ai.llm import create_provider
+from git_commit_ai.llm.ollama_provider import sends_key_unencrypted
+from git_commit_ai.llm.registry import spec
+from git_commit_ai.onboarding.wizard import SetupWizard
 
 if TYPE_CHECKING:
     from git_commit_ai.agents.graph import GenerationResult
@@ -40,6 +52,9 @@ def generate(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the message without committing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Commit without asking for confirmation."),
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Ask before committing, even in auto commit mode."
+    ),
     accept_partial: bool = typer.Option(
         False,
         "--accept-partial",
@@ -72,17 +87,23 @@ def generate(
     """Generate a commit message for the staged changes.
 
     The message is printed to stdout; progress and diagnostics go to stderr.
-    Unless --dry-run is given, you are asked to confirm before committing.
+    What happens next follows the commit mode (preview, confirm or auto; see
+    `git ai-commit mode`): --dry-run prints only, --yes commits without asking, and
+    --confirm asks first. Without a terminal, confirm mode refuses instead of asking.
     With --amend the last commit is replaced. Its own message is not used as
     an example, and the message is written for the combined change.
 
-    If a provider error cut the run short, --yes refuses to commit the unfinished
-    draft (exit code 1) unless --accept-partial is also given.
+    If a provider error cut the run short, --yes (or auto mode) refuses to commit the
+    unfinished draft (exit code 1) unless --accept-partial is also given.
     """
     if ctx.invoked_subcommand is not None:
         return
+    if yes and confirm:
+        typer.secho("Error: --yes and --confirm can't be used together.", fg="red", err=True)
+        raise typer.Exit(code=2)
     if hint is not None and len(hint) > _MAX_HINT_CHARS:
         _fail(f"--hint is {len(hint)} characters; keep it under {_MAX_HINT_CHARS}.")
+    settings: Settings | None = None
     try:
         settings = load_cli_settings(path).with_flags(
             llm_provider=provider, llm_model=model, max_iterations=max_iterations
@@ -108,7 +129,12 @@ def generate(
         snapshots = SnapshotManager(inspector, config)
         snapshot = snapshots.capture()
 
-        llm = create_provider(config, env=settings.environment, on_retry=_announce_retry)
+        settings = _ensure_provider(ctx, settings, path, provider, model, max_iterations)
+        config = settings.config
+        key = settings.api_key_for(config.llm_provider)
+        if key and config.llm_provider is ProviderName.OLLAMA:
+            _warn_if_unencrypted(config.ollama_base_url)
+        llm = create_provider(config, key.value if key else None, on_retry=_announce_retry)
         if amend:
             _note("Amending the last commit; the message covers it together with staged changes.")
         _note(f"Generating a commit message with {llm.name}/{llm.model}...")
@@ -120,27 +146,109 @@ def generate(
         _report_review(result)
         typer.echo(result.message)
 
-        if dry_run:
+        action = _commit_action(settings.config.commit_mode, dry_run, yes, confirm)
+        if action is CommitMode.PREVIEW:
             return
         if info.is_detached_head:
             _note(
                 "HEAD is detached: the new commit will not belong to any branch.",
                 color=typer.colors.YELLOW,
             )
-        if yes and result.interruption and not accept_partial:
+        if action is CommitMode.AUTO and result.interruption and not accept_partial:
             _fail(
                 f"Not committing: the run stopped early ({result.interruption}). "
                 "Rerun, review the draft above and commit it yourself, "
                 "or pass --accept-partial to let --yes commit it."
             )
-        if not yes:
-            typer.confirm("Commit with this message?", abort=True, err=True)
+        if action is CommitMode.CONFIRM:
+            _confirm_commit(current(ctx))
         short_hash = GitCommitter(inspector, snapshots).commit(
             result.message, snapshot, amend=amend, no_verify=no_verify
         )
         _note(f"Committed {short_hash}")
+    except AuthenticationError as exc:
+        _fail(_rejected_key_message(exc, settings))
+    except ModelNotAvailableError as exc:
+        _fail(f"{exc} Run `git ai-commit model` to choose another.")
     except GitCommitAIError as exc:
         _fail(str(exc))
+
+
+def _commit_action(mode: CommitMode, dry_run: bool, yes: bool, confirm: bool) -> CommitMode:
+    """Flags win over the saved commit mode: --dry-run previews, --yes commits, --confirm asks."""
+    if dry_run:
+        return CommitMode.PREVIEW
+    if yes:
+        return CommitMode.AUTO
+    if confirm:
+        return CommitMode.CONFIRM
+    return mode
+
+
+def _confirm_commit(interaction: Interaction) -> None:
+    """Ask before committing; never prompt without a terminal (plan D12)."""
+    if not interaction.interactive:
+        _fail(
+            "Not committing: there is no terminal to confirm in. "
+            "Pass --yes, or --dry-run to print only."
+        )
+    try:
+        agreed = interaction.prompter_factory().confirm("Commit with this message?")
+    except SetupCancelledError:
+        agreed = False
+    if not agreed:
+        _note("Aborted.")
+        raise typer.Exit(code=1)
+
+
+def _ensure_provider(
+    ctx: typer.Context,
+    settings: Settings,
+    path: str,
+    provider: ProviderName | None,
+    model: str | None,
+    max_iterations: int | None,
+) -> Settings:
+    """Make sure the provider has a key, setting one up if a terminal allows it.
+
+    With nothing set up at all (plan D9) the full wizard runs, or, without a terminal,
+    ``SetupRequiredError`` explains what to do. With a saved setup that only lacks the
+    key, only the key is asked for. Otherwise the settings are returned unchanged and
+    ``create_provider`` reports a missing key as before.
+    """
+    config = settings.config
+    if not spec(config.llm_provider).requires_key or settings.api_key_for(config.llm_provider):
+        return settings
+    interaction = current(ctx)
+    if setup_required(settings):
+        if not interaction.interactive:
+            raise SetupRequiredError
+        result, saved = run_wizard(interaction, settings, SetupWizard.run_full)
+        report_setup(result, saved)
+        typer.echo(err=True)
+    elif interaction.interactive:
+        run_wizard(interaction, settings, lambda w: w.run_key(config.llm_provider))
+    else:
+        return settings
+    return load_cli_settings(path).with_flags(
+        llm_provider=provider, llm_model=model, max_iterations=max_iterations
+    )
+
+
+def _rejected_key_message(error: AuthenticationError, settings: Settings | None) -> str:
+    provider = settings.config.llm_provider if settings else None
+    if provider is None:
+        return str(error)
+    label = spec(provider).label
+    key = settings.api_key_for(provider) if settings else None
+    if key is None:
+        return str(error)
+    where = {
+        SettingSource.ENVIRONMENT: "the environment",
+        SettingSource.DOTENV: "the .env file",
+    }.get(key.source, f"the {key.source.value}")
+    fix = f"Update {key.variable}." if key.variable else "Run `git ai-commit key` to replace it."
+    return f"{label} rejected the API key from {where}. {fix}"
 
 
 def _check_repository_state(operation: RepositoryOperation) -> None:
@@ -209,6 +317,15 @@ def _report_review(result: GenerationResult) -> None:
     best = next((d for d in result.state.drafts if d.message == result.message), None)
     for violation in best.critique.violations if best and best.critique else []:
         _note(f"  - {violation.rule}: {violation.message}", color=typer.colors.YELLOW)
+
+
+def _warn_if_unencrypted(base_url: str) -> None:
+    if sends_key_unencrypted(base_url):
+        _note(
+            f"Warning: your Ollama key is sent to {base_url} without encryption; "
+            "use an https:// URL if the server supports it.",
+            color=typer.colors.YELLOW,
+        )
 
 
 def _announce_retry(event: RetryEvent) -> None:

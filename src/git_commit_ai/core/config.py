@@ -20,7 +20,17 @@ class ProviderName(enum.StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GEMINI = "gemini"
+    OPENROUTER = "openrouter"
+    HUGGINGFACE = "huggingface"
     OLLAMA = "ollama"
+
+
+class CommitMode(enum.StrEnum):
+    """What happens once a message is ready."""
+
+    PREVIEW = "preview"
+    CONFIRM = "confirm"
+    AUTO = "auto"
 
 
 ENV_FIELDS: dict[str, str] = {
@@ -34,7 +44,35 @@ ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_RETRY_MAX_DELAY": "llm_retry_max_delay_seconds",
     "GITCOMMIT_AI_MAX_ITERATIONS": "max_iterations",
     "GITCOMMIT_AI_MAX_DIFF_CHARS": "max_prompt_diff_chars",
+    "GITCOMMIT_AI_COMMIT_MODE": "commit_mode",
 }
+
+# Variables that hold each provider's API key, canonical name first. Ollama's key is
+# optional: only Ollama Cloud and servers behind authentication need one.
+PROVIDER_KEY_VARIABLES: dict[ProviderName, tuple[str, ...]] = {
+    ProviderName.OPENAI: ("OPENAI_API_KEY",),
+    ProviderName.ANTHROPIC: ("ANTHROPIC_API_KEY",),
+    ProviderName.GEMINI: ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    ProviderName.OPENROUTER: ("OPENROUTER_API_KEY",),
+    ProviderName.HUGGINGFACE: ("HF_TOKEN",),
+    ProviderName.OLLAMA: ("OLLAMA_API_KEY",),
+}
+
+# Variables that configured a provider before the config file existed. Setting any of them
+# means the user already set things up through the environment, so first-run setup never
+# starts. Key variables this tool only began reading later are left out: they are often
+# set for other tools, and a run with only those fails without setup.
+ENVIRONMENT_SETUP_VARIABLES: tuple[str, ...] = (
+    "GITCOMMIT_AI_PROVIDER",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+)
+
+
+def config_key(variable: str) -> str:
+    """The ``config.toml`` key for a ``GITCOMMIT_AI_*`` variable: ``GITCOMMIT_AI_X`` is ``x``."""
+    return variable.removeprefix("GITCOMMIT_AI_").lower()
 
 
 class GitCommitAIConfig(BaseModel):
@@ -116,6 +154,11 @@ class GitCommitAIConfig(BaseModel):
         description="Character budget for diff content included in LLM prompts",
     )
 
+    commit_mode: CommitMode = Field(
+        default=CommitMode.CONFIRM,
+        description="preview prints only, confirm asks first, auto commits without asking",
+    )
+
     @model_validator(mode="after")
     def _check_retry_delays(self) -> GitCommitAIConfig:
         if self.llm_retry_base_delay_seconds > self.llm_retry_max_delay_seconds:
@@ -132,15 +175,29 @@ class GitCommitAIConfig(BaseModel):
             ConfigurationError: If a variable holds an invalid value.
         """
         values = {field: env[var] for var, field in ENV_FIELDS.items() if env.get(var)}
+        return cls.from_values(values, {field: var for var, field in ENV_FIELDS.items()})
+
+    @classmethod
+    def from_values(
+        cls, values: Mapping[str, object], labels: Mapping[str, str]
+    ) -> GitCommitAIConfig:
+        """Validate ``values`` (field name to raw value). An error names each bad field by
+        its label in ``labels``, such as the variable or config key it came from.
+
+        Raises:
+            ConfigurationError: If a value is invalid.
+        """
         try:
-            return cls.model_validate(values)
+            return cls.model_validate(dict(values))
         except ValidationError as exc:
             problems = "; ".join(
-                f"{_env_var_for(str(err['loc'][0]))}: {err['msg']}" for err in exc.errors()
+                f"{_label(err['loc'], labels)}: {err['msg']}" for err in exc.errors()
             )
             raise ConfigurationError(f"Invalid configuration: {problems}") from exc
 
 
-def _env_var_for(field: str) -> str:
-    """Return the environment variable that populates a config field."""
-    return next((var for var, name in ENV_FIELDS.items() if name == field), field)
+def _label(location: tuple[int | str, ...], labels: Mapping[str, str]) -> str:
+    """Name a validation error's field the way the user set it."""
+    if not location:
+        return "settings"
+    return labels.get(str(location[0]), str(location[0]))

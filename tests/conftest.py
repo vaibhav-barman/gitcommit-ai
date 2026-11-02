@@ -4,9 +4,51 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
+from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
+from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from tests.fixtures.git_repo import commit_file, init_repo
+
+# Variables that would let a developer's own setup leak into a test.
+_ISOLATED_VARIABLES = (
+    "GITCOMMIT_AI_PROVIDER",
+    "GITCOMMIT_AI_MODEL",
+    "GITCOMMIT_AI_COMMIT_MODE",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "HF_TOKEN",
+    "OLLAMA_API_KEY",
+    "CI",
+)
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any test that would send a real HTTP request. Tests pass a fake transport."""
+
+    def refuse(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"network access in a test: {request.method} {request.url}")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the per-user config at a temporary directory, skip ``.env`` loading and clear
+    provider variables, so neither the real ``~/.config/gitcommit-ai`` nor a developer's own
+    ``.env`` in the checkout can change a test. Tests of ``.env`` handling set
+    ``GITCOMMIT_AI_ENV_FILE`` themselves (or delete it to test discovery)."""
+    directory = tmp_path / "user-config"
+    monkeypatch.setenv(CONFIG_DIR_VARIABLE, str(directory))
+    monkeypatch.setenv(ENV_FILE_VARIABLE, "")
+    for variable in _ISOLATED_VARIABLES:
+        monkeypatch.delenv(variable, raising=False)
+    return directory
 
 
 @pytest.fixture

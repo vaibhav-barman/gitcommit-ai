@@ -10,14 +10,16 @@ from typing import NoReturn
 import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
+from git_commit_ai.cli.interaction import setup_required
 from git_commit_ai.cli.settings_loader import load_cli_settings
-from git_commit_ai.core.exceptions import GitCommitAIError
+from git_commit_ai.core.exceptions import GitCommitAIError, SetupRequiredError
 from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
 from git_commit_ai.git.diff import DiffExtractor
 from git_commit_ai.git.history import CommitHistoryExtractor
 from git_commit_ai.git.hooks import HOOK_NAME, SKIP_VARIABLE, HookInstaller
 from git_commit_ai.git.repository import RepositoryInspector
 from git_commit_ai.llm import create_provider
+from git_commit_ai.llm.registry import spec
 
 hook_app = typer.Typer(
     name="hook",
@@ -84,10 +86,16 @@ def run(
 
     Any problem (no staged changes, no API key, provider failure, even an
     unexpected error) is reported on stderr and the commit carries on with its
-    normal, empty message.
+    normal, empty message. The hook never asks anything, even in a terminal.
     """
     try:
         _propose(message_file, source, path)
+    except SetupRequiredError:
+        typer.secho(
+            "git-ai-commit: no proposal (no provider is set up; run git ai-commit setup)",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     except Exception as exc:  # the hook must never be the reason a commit fails
         typer.secho(f"git-ai-commit: no proposal ({exc})", fg=typer.colors.YELLOW, err=True)
 
@@ -109,8 +117,11 @@ def _propose(message_file: Path, source: str, path: str) -> None:
         return
     history = CommitHistoryExtractor(inspector=inspector, config=config).get_history()
 
+    key = settings.api_key_for(config.llm_provider)
+    if key is None and spec(config.llm_provider).requires_key and setup_required(settings):
+        raise SetupRequiredError
     typer.secho("git-ai-commit: writing a proposed message...", err=True)
-    llm = create_provider(config, env=settings.environment)
+    llm = create_provider(config, key.value if key else None)
     result = CommitMessageGraph(llm, config).run(diff, history)
 
     separator = "" if not existing or existing.startswith("\n") else "\n"

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import typer
 
+from git_commit_ai.cli.settings_loader import load_saved_layers
 from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
 from git_commit_ai.core.exceptions import GitCommitAIError
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE, load_settings
@@ -51,15 +52,22 @@ def run(
     if offline and (provider is not None or model is not None):
         _fail("--offline replaces the LLM, so it cannot be combined with --provider or --model.")
     try:
-        # Offline runs ignore the real environment and any .env, so they are reproducible.
-        settings = load_settings({ENV_FILE_VARIABLE: ""} if offline else os.environ).with_flags(
+        # Offline runs ignore the real environment, any .env and the saved config, so they
+        # are reproducible. Live runs use the same layers as the CLI.
+        if offline:
+            settings = load_settings({ENV_FILE_VARIABLE: ""})
+        else:
+            user_config, credentials = load_saved_layers()
+            settings = load_settings(os.environ, user_config=user_config, credentials=credentials)
+        settings = settings.with_flags(
             llm_provider=provider, llm_model=model, max_iterations=max_iterations
         )
         config = settings.config
         if offline:
             make_llm: LLMFactory = _offline_for
         else:
-            llm = create_provider(config, env=settings.environment, on_retry=_announce_retry)
+            key = settings.api_key_for(config.llm_provider)
+            llm = create_provider(config, key.value if key else None, on_retry=_announce_retry)
             typer.secho(
                 f"Live run with {llm.name}/{llm.model}: up to {1 + 2 * config.max_iterations} "
                 f"model calls per commit, for up to {count} commits.",

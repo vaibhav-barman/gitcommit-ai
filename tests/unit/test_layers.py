@@ -11,7 +11,8 @@ ALLOWED: dict[str, set[str]] = {
     "context": {"core"},
     "llm": {"core"},
     "agents": {"context", "core", "llm"},
-    "cli": {"agents", "context", "core", "git", "llm"},
+    "onboarding": {"core", "llm"},
+    "cli": {"agents", "context", "core", "git", "llm", "onboarding"},
 }
 
 
@@ -27,6 +28,7 @@ def test_every_layer_imports_only_what_it_may() -> None:
 def test_agents_never_touch_git_and_nothing_imports_the_cli() -> None:
     edges = import_edges()
     assert ("agents", "git") not in edges
+    assert not {("onboarding", "agents"), ("onboarding", "context"), ("onboarding", "git")} & edges
     assert not any(target == "cli" for _, target in edges)
 
 
@@ -39,9 +41,11 @@ def test_the_drawn_layers_are_the_real_ones_without_implied_edges() -> None:
     assert real_layer_edges() == {
         ("cli", "agents"),
         ("cli", "git"),
+        ("cli", "onboarding"),
         ("agents", "context"),
         ("agents", "llm"),
         ("context", "core"),
         ("git", "core"),
         ("llm", "core"),
+        ("onboarding", "llm"),
     }

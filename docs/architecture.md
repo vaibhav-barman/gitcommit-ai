@@ -26,14 +26,16 @@ The codebase follows a `src`-based package layout (`src/git_commit_ai/`) divided
 flowchart LR
     cli["cli"] --> agents["agents"]
     cli --> git["git"]
+    cli --> onboarding["onboarding"]
     agents --> context["context"]
     agents --> llm["llm"]
     context --> core["core"]
     git --> core
     llm --> core
+    onboarding --> llm
 ```
 
-(The CLI also imports `context`, `core` and `llm` directly: it builds the provider and prints the deterministic reports. `agents` never imports `git`, and nothing below `cli` imports it.)
+(The CLI also imports `context`, `core` and `llm` directly: it builds the provider and prints the deterministic reports. `agents` never imports `git`, and nothing below `cli` imports it. `onboarding`, the setup wizard, imports only `llm` and `core`.)
 
 ```
 src/git_commit_ai/
@@ -72,12 +74,12 @@ Contains data structures and runtime configuration shared across all layers:
     - `ExampleRetrievalResult`: Result of historical example selection. Fields: `examples`, `total_candidates`, `selection_metadata`.
     - `RepositoryContext`: Aggregated repository context bundle for consumption by AI generators. Fields: `style_profile`, `convention_result`, `historical_examples`, `analyzed_commit_count`, `retrieval_metadata`.
 - **`config.py`**:
-  - `GitCommitAIConfig`: Pydantic settings model. Fields: `history_commit_count`, `git_timeout_seconds`, `default_diff_mode`, `max_diff_size_bytes`, `llm_provider`, `llm_model`, `llm_temperature`, `llm_timeout_seconds`, `llm_max_retries`, `llm_retry_base_delay_seconds`, `llm_retry_max_delay_seconds`, `ollama_base_url`, `max_iterations` (1–10), `max_prompt_diff_chars`. The retry base delay may not exceed the max delay.
-  - `GitCommitAIConfig.from_env()` and `ENV_FIELDS`: map `GITCOMMIT_AI_*` variables to fields; an invalid value raises `ConfigurationError` naming the variable.
-  - `ProviderName`: `StrEnum` of the supported backends.
-  - API keys are deliberately **not** part of the configuration; they are read from the environment when a provider is created, so they never appear in reprs or logs.
+  - `GitCommitAIConfig`: Pydantic settings model. Fields: `history_commit_count`, `git_timeout_seconds`, `default_diff_mode`, `max_diff_size_bytes`, `llm_provider`, `llm_model`, `llm_temperature`, `llm_timeout_seconds`, `llm_max_retries`, `llm_retry_base_delay_seconds`, `llm_retry_max_delay_seconds`, `ollama_base_url`, `max_iterations` (1–10), `max_prompt_diff_chars`, `commit_mode`. The retry base delay may not exceed the max delay.
+  - `GitCommitAIConfig.from_env()` / `from_values()` and `ENV_FIELDS`: map `GITCOMMIT_AI_*` variables to fields; an invalid value raises `ConfigurationError` naming the variable, or `config.toml: <key>` when the value came from the saved config. `config_key()` maps a variable to its config key: the name without the `GITCOMMIT_AI_` prefix, lowercased.
+  - `ProviderName` (six providers), `CommitMode` (`preview`, `confirm`, `auto`), `PROVIDER_KEY_VARIABLES` (each provider's key variables, canonical first) and `ENVIRONMENT_SETUP_VARIABLES` (the variables whose presence means "already set up through the environment").
+  - API keys are deliberately **not** part of the configuration; they are resolved separately (`Settings.api_key_for`) and held only in fields left out of `repr`.
 - **`settings.py`**:
-  - `load_settings(env, start_dir, repo_root)` layers **flags > process environment > `.env` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, default).
+  - `load_settings(env, start_dir, repo_root, user_config, credentials)` layers **flags > process environment > `.env` > `config.toml` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, config file, credentials file, keychain, default). The saved model is the one stored for the *effective* provider. `Settings.api_key_for(provider)` returns a `ResolvedKey` (key variables in the environment, then `.env`, then the credential store), and `provider_configured_by_environment()` answers the first-run question.
   - The `.env` file is looked for in exactly two places: `start_dir` (the current directory) and then `repo_root`. Nothing else is searched: not parent directories, not the directories between the two, not the home directory, so a stray `.env` elsewhere cannot change the configuration. `core` knows nothing about Git, so the CLI resolves the root (`cli/settings_loader.py`, via `RepositoryInspector.find_repository_root()`); outside a repository, or without Git, only the current directory is searched. The file is parsed with `python-dotenv` into a dict. It is **never** written into `os.environ`, so its values cannot leak into child processes. `GITCOMMIT_AI_ENV_FILE` names a specific file, or disables loading when empty. Blank values count as unset at every layer.
   - `Settings.with_flags()` applies command-line flags on top (a flag left unset does not override anything); `mask_secret()` keeps only the last four characters of a secret.
 - **`exceptions.py`**:
@@ -91,7 +93,10 @@ Contains data structures and runtime configuration shared across all layers:
     - `ConfigurationError`: An environment variable or setting is invalid.
     - `AgentStateError`: A graph node ran before its upstream data existed.
     - `HookError`: The prepare-commit-msg hook cannot be installed or removed safely.
-    - `LLMError` and subclasses: `MissingAPIKeyError`, `ProviderNotInstalledError`, `OllamaUnreachableError`, `RateLimitError` (carries `retry_after` when the server sent one), `TransientLLMError` (timeouts, dropped connections, 5xx; retried), `LLMResponseError`.
+    - `UnsupportedConfigVersionError`: refuses to rewrite a `config.toml` written by a newer release.
+    - `SetupRequiredError`, `SetupCancelledError`: nothing is set up and there is no terminal; the user left setup (nothing was written).
+    - `LLMError` and subclasses: `MissingAPIKeyError`, `AuthenticationError` (fixed text, never the provider's body), `ModelNotAvailableError`, `RequestRejectedError` (other 4xx, with the redacted provider message and the blamed `param`), `OllamaUnreachableError`, `RateLimitError` (carries `retry_after` when the server sent one), `TransientLLMError` (timeouts, dropped connections, 5xx; retried), `LLMResponseError`.
+- **`paths.py`**, **`toml_writer.py`**, **`user_config.py`**, **`credentials.py`**: saved settings and keys; see [Onboarding and storage](#7-onboarding-and-storage).
 
 ### B. Git Intelligence Module (`git_commit_ai.git`)
 
@@ -172,17 +177,24 @@ Builds the user-facing command-line tool using [Typer](https://typer.tiangolo.co
 - `context`: Analyzes and displays detected commit convention, confidence, style profile metrics, common types, common scopes, and evidence.
 - `examples`: Retrieves and displays top historical commit examples matching staged or unstaged changes, complete with relevance scores, summaries, and selection reasons.
 - `generate`: runs the agent graph on the staged diff (see §5), prints the message to stdout, and commits after confirmation. Flags: `--provider`, `--model`, `--dry-run`, `--yes`, `--accept-partial`, `--max-iterations`, `--hint`, `--amend`, `--no-verify`, `--verbose`, `--path`. Diagnostics go to stderr. `--yes` refuses (exit code 1) to commit a draft left unfinished by a provider error unless `--accept-partial` is given. A merge, cherry-pick or revert in progress is refused (Git has already prepared the message), a rebase proceeds with a note, and a detached `HEAD` gets a warning before committing.
-- `config`: shows each effective setting with its source and the `.env` file in use; API keys are masked to their last four characters.
+- `config`: alone, shows each effective setting with its source, the `.env` file and `config.toml` in use; API keys are masked to their last four characters. `config get/set/unset/path` read and change `config.toml`: each key is a variable name without `GITCOMMIT_AI_`, a change is validated against the full settings before it is written, and switching `credential_store` moves every saved key. Keys are refused (they would land in shell history).
+- `reset` lists and removes `config.toml`, `credentials.toml` and keychain entries, and works even on a damaged file or one from a newer release. `doctor` (`cli/doctor.py`) shows what is in effect and checks it against the provider without ever asking anything: key check, model listed, and a capped test request unless `--no-request`.
 - `hook install` / `hook uninstall`: manage the `prepare-commit-msg` hook. A hidden `hook run` is what the hook calls; it writes a proposal into the message file above Git's comments and **never blocks a commit**: no staged changes, a pending merge, a user template, a missing key, a provider failure or any unexpected error only print a note.
 - `git-ai-commit` console script: a command group whose callback is `generate`, so a bare `git ai-commit --dry-run` works (git finds `git-<name>` executables on `PATH`) while `config` and `hook` remain reachable. It also accepts `-h`, because git intercepts `--help` for external commands.
-- `cli/settings_loader.py` is the one place commands load settings: it resolves the repository root and calls `load_settings`.
+- `cli/settings_loader.py` is the one place commands load settings: it resolves the repository root, reads the saved `config.toml` and credential store, and calls `load_settings`. It warns when the credentials file is readable by others, when `config.toml` came from a newer release, and when `GITCOMMIT_AI_CONFIG_DIR` points inside the repository.
+- `cli/interaction.py`: an `Interaction` on `ctx.obj` says whether the run may ask questions (stdin and stdout are terminals, `TERM` is not `dumb`, `CI` is unset) and builds the prompter. `run_wizard` runs one wizard flow and saves its result. Tests pass an `Interaction` with scripted answers and a fake HTTP transport.
+- `cli/setup_cmds.py`: `setup`, `provider [NAME]`, `model [NAME] [--provider]` and `key [--provider] [--stdin]`, on both entry points. The forms with a name or `--stdin` never ask.
+- `generate` checks the key just before building the provider. With nothing set up at all it runs the full wizard (or, without a terminal, raises `SetupRequiredError`); with a saved setup, a `--provider` flag or `GITCOMMIT_AI_PROVIDER` but no key, it asks for the key alone in a terminal and otherwise reports the missing key variable. A rejected key names where it came from, and a retired model points to `model`. The hook never asks: with nothing set up it prints `no proposal (no provider is set up; ...)` and the commit continues.
 - Error handling maps all `GitCommitAIError` exceptions to clean terminal stderr messages and exit code 1.
 
 ### E. LLM Module (`git_commit_ai.llm`)
 
 - **`base.py`**: `LLMMessage`/`Role` and the `LLMProvider` protocol: `name`, `model`, and `complete(messages) -> str`. The protocol is deliberately text-in/text-out; structured replies are layered on top by `agents.llm_json`.
-- **`factory.py`**: `create_provider(config, env)` picks the backend, resolves the model (explicit or provider default), and reads the API key from the environment, and wraps the backend in a `RetryingProvider`. Backend modules are imported lazily, so a missing optional SDK only affects the provider that needs it (`ProviderNotInstalledError` names the extra to install).
-- **Backends** (`openai_provider.py`, `anthropic_provider.py`, `gemini_provider.py`, `ollama_provider.py`): thin wrappers over the official SDKs. Each translates SDK failures into typed errors (rate limit, transient for timeouts/connection drops/5xx, unreachable Ollama) and rejects empty completions. Anthropic and Gemini receive the system prompt out of band.
+- **`factory.py`**: `create_provider(config, api_key)` picks the backend, resolves the model (explicit or provider default), and wraps the backend in a `RetryingProvider`. The key is resolved by the caller (`Settings.api_key_for`: environment, then `.env`, then the credential store); a provider that needs one and gets none raises `MissingAPIKeyError`.
+- **`http.py`**: no provider SDKs are used. `HttpClient` sends JSON over `httpx` with auth in headers only (never in URLs), and `map_http_error` turns every failure into a typed error: timeouts, dropped connections, 408, 5xx and 529 are `TransientLLMError`; 429 is `RateLimitError` with the numeric `retry-after`; 401/403 (and Gemini's `API_KEY_INVALID`) are `AuthenticationError` with fixed text, because some providers echo the key in the body; a 404 or a "model not found" 400 is `ModelNotAvailableError`; anything else is `RequestRejectedError` carrying the provider's own message, redacted and truncated. `redact` removes the known keys and anything key-shaped.
+- **`registry.py`**: one `ProviderSpec` per provider (label, key variables, whether a key is required, key URL, base URL, default model, fallback models, backend kind, extra headers). The factory, the `config` command, the docs checker and the setup wizard all read it.
+- **Backends**: `openai_compatible.py` serves OpenAI, OpenRouter (which also gets two attribution headers) and Hugging Face Inference Providers, which differ only in base URL (`POST /chat/completions` with a Bearer key; drops `temperature` once if the model rejects it), `anthropic_provider.py` (`POST /v1/messages`, `x-api-key` and `anthropic-version`), `gemini_provider.py` (`POST /v1beta/models/{model}:generateContent`, `x-goog-api-key`) and `ollama_provider.py` (`POST /api/chat`, with an optional Bearer key for Ollama Cloud or a protected server; a refused connection is `OllamaUnreachableError`, and the CLI warns when a key would go over plain `http://` to another machine). Each rejects empty completions; Anthropic and Gemini receive the system prompt out of band.
+- **`catalog.py`**: what setup asks a provider, all from its live API. `check_key()` makes the cheapest call that rejects a bad key (`KeyCheck.VALID`, `INVALID`, or `UNKNOWN` on a timeout or 5xx). `list_models()` returns a `ModelListing` filtered to chat models and sorted per provider (Anthropic follows `after_id`, Gemini `nextPageToken`; OpenAI drops embedding, audio, image and similar ids; OpenRouter drops expired and non-text models; Hugging Face keeps models with a live inference provider; Ollama hides embedding-only models and names them). `probe(model)` sends one request capped at 16 output tokens and passes on any 2xx. Setup calls use a 10-second timeout and retry once on a 429 whose `retry-after` is 10 seconds or less. `detect_ollama()` reads `GET /api/version` and reports reachable, needs a key, or why not.
 - **`retry.py`**: `RetryingProvider` retries only `RateLimitError` and `TransientLLMError` with exponential backoff (`RetryPolicy`: max retries, base delay, max delay). A server's `retry-after` is honoured when it fits within the max delay; a longer one is not waited out, so the bound is hard. Bad keys, empty replies and an unreachable Ollama fail immediately. Each retry is reported through an optional callback (the CLI prints it).
 - **`fake.py`**: `FakeLLM` replays a scripted sequence or a handler callable and records calls. An exhausted sequence raises rather than reusing a reply, so tests cannot silently pass on stale data.
 
@@ -425,7 +437,7 @@ sequenceDiagram
 - **Rules before the LLM**: anything checkable deterministically is, which makes critic behavior reproducible and cheap, and keeps the LLM for the one question rules cannot answer.
 - **One shared definition of "correct"**: generator and critic both use `effective_convention`, and the imperative verb list is a single public constant of the style analyzer.
 - **Graceful degradation over failure**: an unparsable or failed faithfulness check becomes a warning, a provider error after the first draft returns the best draft so far, and an exhausted iteration budget does the same. Retry covers transient errors first. Errors that retrying cannot fix (missing key, unreachable Ollama) fail immediately, and a failure before any draft exists aborts.
-- **Optional SDKs**: only `langgraph` is a core dependency of the agents; provider SDKs are extras imported lazily.
+- **HTTP, not SDKs**: every provider is a few JSON requests over `httpx` (already a dependency of `langgraph`), so one install works for every provider and errors are mapped in one place.
 - **`.env` is parsed, never exported**: `python-dotenv` reads the file into a dict that is overlaid under the real environment, so it cannot leak into child processes or override what the user set deliberately.
 - **A hook must never be the reason a commit fails**: `hook run` swallows every error, and the script itself exits 0 when the tool is missing.
 - **Layout is mechanical, judgement is not**: wrapping and the blank line are applied by code; whether a body is wanted is a deterministic rule shared by generator and critic.
@@ -448,14 +460,15 @@ sequenceDiagram
 | Style Analyzer | **Implemented** | Subject length (mean/median), capitalization, punctuation, body/scope usage, shifts |
 | Example Selector | **Implemented** | Multi-factor heuristic scoring (scope, path, type, keyword) with recency decay |
 | Context Engine Orchestrator | **Implemented** | Complete deterministic pipeline assembling `RepositoryContext` |
-| LLM Provider Abstraction | **Implemented** | OpenAI, Anthropic, Gemini, Ollama behind one protocol; typed errors; `FakeLLM` |
+| LLM Provider Abstraction | **Implemented** | Anthropic, Gemini, Hugging Face, OpenAI, OpenRouter and Ollama over plain HTTP behind one protocol; typed errors; `FakeLLM` |
+| Guided Onboarding | **Implemented** | First-run wizard, live key checks, model listings and test request, saved config and credentials, commit modes, `setup`/`provider`/`model`/`key`/`mode`/`config`/`reset`/`doctor` |
 | Prompt Engineering & Few-Shot | **Implemented** | Convention- and profile-driven prompts with retrieved examples and critic feedback |
 | LangGraph State Graph | **Implemented** | Analyst, retrieval, generator, critic nodes; capped reflection loop with best-draft fallback |
 | Diff Budgeting | **Implemented** | Water-filled per-file truncation; binary files summarised without patches |
-| CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`, `config`, `hook`; `git ai-commit` entry point |
+| CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`, `config`, `hook`, the onboarding commands; `git ai-commit` entry point |
 | Unit & Integration Tests | **Implemented** | Unit, integration and eval tests using isolated temporary Git repositories and `FakeLLM`; no network |
 | Retry & Degradation | **Implemented** | Bounded exponential backoff; best-draft fallback on late provider errors |
-| Layered Settings | **Implemented** | flags > environment > `.env` (current directory or repository root only) > defaults; `config` command with masked secrets |
+| Layered Settings | **Implemented** | flags > environment > `.env` (current directory or repository root only) > `config.toml` > defaults; `config` command with masked secrets |
 | Hint & Bodies | **Implemented** | `--hint`; deterministic body rule; 72-column layout; body critic rules |
 | Amend / No-verify | **Implemented** | `DiffMode.AMEND`, HEAD-aware staleness guard, passthrough flags |
 | Hook Installer | **Implemented** | Backs up and chains foreign hooks; never blocks a commit |
@@ -465,3 +478,16 @@ sequenceDiagram
 | Demo Tooling | **Implemented** | `docs/demo.tape`, `scripts/demo/prepare.sh`, `make demo`; the GIF itself has to be recorded with a live provider |
 | CI & Packaging | **Implemented** | GitHub Actions (Ruff, mypy, pytest on 3.11–3.13, build smoke test); `py.typed` |
 | Interactive TUI | *Planned* | Interactive review and editing of the proposed message |
+
+## 7. Onboarding and storage
+
+The goal is `pipx install`, `git ai-commit`, a few answers, done, without changing anything for people who configure through environment variables.
+
+**Storage (`core`).** `paths.config_dir()` picks `GITCOMMIT_AI_CONFIG_DIR`, else `%APPDATA%\gitcommit-ai` on Windows, else `$XDG_CONFIG_HOME/gitcommit-ai` (absolute only) or `~/.config/gitcommit-ai`, macOS included. `user_config.py` reads and writes `config.toml` (a `UserConfig`: provider, commit mode, credential store, per-provider model and Ollama URL, generation overrides) with a small in-house TOML writer (`toml_writer.py`) whose output is round-trip checked with `tomllib`. A file from a newer schema version is read but never rewritten. `credentials.py` keeps keys in `credentials.toml` (temporary file created owner-only, then `os.replace`; mode 0600; directory 0700) or, opt-in, the OS keychain through the `keyring` extra. `migrate_keys` moves every key when the store changes, deleting from the old store only after every copy succeeded. Every write is atomic, so Ctrl+C never leaves half a file.
+
+**Setup questions (`llm.catalog`).** All answers come from the provider's API: a cheap key check, a filtered and sorted model listing, and one probe capped at 16 output tokens. The registry's fallback models appear only when listing fails, labelled with the date they were current.
+
+**The wizard (`onboarding`).** `SetupWizard` asks provider, key, model, commit mode and (when the keychain is usable and there is a new key) where to keep it, through a `Prompter`. `QuestionaryPrompter` gives arrow-key menus with number shortcuts and type-to-filter; `make_prompter` falls back to `PlainPrompter`, numbered prompts over plain lines, when prompt_toolkit cannot start (Git Bash). Every prompt raises `SetupCancelledError` on Ctrl+C. The Ollama branch (`ollama_flow.py`) handles this computer, Ollama Cloud (the probe is the key check, because listing is public) and another server (URL normalised, plain `http://` to another machine warned about, a 401/403 asks for a key). The wizard writes nothing; `persist()` saves a finished `SetupResult`: keys first, then `config.toml`, so a complete `config.toml` means setup finished.
+
+**When it runs (`cli`).** `generate` checks the key just before building the provider, after the repository and diff checks, so a run that would fail anyway (nothing staged) never starts setup. The full wizard runs only when there is no `config.toml`, no `--provider` flag, nothing in the environment or `.env` set a provider up the old way, and the session is interactive (stdin and stdout are terminals, `TERM` is not `dumb`, `CI` is unset). A saved setup that lacks only the key asks for the key alone. Without a terminal nothing ever prompts: first runs raise `SetupRequiredError`, and `confirm` mode refuses to commit. The hook is never interactive.
+
