@@ -16,7 +16,7 @@ from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
 from git_commit_ai.core.user_config import UserConfig, save_user_config
 from git_commit_ai.llm import FakeLLM
 from git_commit_ai.llm.retry import RetryEvent
-from tests.fixtures.cli import use_llm
+from tests.fixtures.cli import plain, use_llm
 from tests.fixtures.git_repo import (
     commit_count,
     diverged_repo,
@@ -682,7 +682,7 @@ class TestGitSubcommand:
         with pytest.raises(SystemExit) as info:
             git_ai_commit()
         assert info.value.code == 0
-        assert "--dry-run" in capsys.readouterr().out
+        assert "--dry-run" in plain(capsys.readouterr().out)
 
     def test_runs_generate_directly_without_a_subcommand_name(self, staged_repo: Path) -> None:
         launcher = "from git_commit_ai.cli.git_subcommand import git_ai_commit; git_ai_commit()"

@@ -16,7 +16,7 @@ from git_commit_ai.core.exceptions import RateLimitError
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from git_commit_ai.core.user_config import UserConfig, save_user_config
 from git_commit_ai.git.hooks import HOOK_NAME
-from tests.fixtures.cli import use_llm
+from tests.fixtures.cli import plain, use_llm
 from tests.fixtures.git_repo import (
     diverged_repo,
     install_hook,
@@ -98,9 +98,10 @@ class TestInstallCommands:
 
     def test_run_is_hidden_from_help(self) -> None:
         result = runner.invoke(app, ["hook", "--help"])
-        assert "install" in result.stdout
-        assert "uninstall" in result.stdout
-        assert "run" not in result.stdout.split("Commands")[1]
+        output = plain(result.stdout)
+        assert "install" in output
+        assert "uninstall" in output
+        assert "run" not in output.split("Commands")[1]
 
 
 class TestRun:

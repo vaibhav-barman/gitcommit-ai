@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,19 @@ if TYPE_CHECKING:
 
     from git_commit_ai.core.config import GitCommitAIConfig
     from git_commit_ai.llm import FakeLLM
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def plain(text: str) -> str:
+    """``text`` without terminal escape codes.
+
+    Typer renders help and usage errors with Rich, and forces colour on GitHub Actions or
+    with ``FORCE_COLOR``. Rich then styles ``--dry-run`` as several pieces, so assertions on
+    help text must look at the plain text.
+    """
+    return _ANSI.sub("", text)
 
 
 class Created:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from git_commit_ai.cli.main import app
+from tests.fixtures.cli import plain
 
 runner = CliRunner()
 
@@ -15,12 +16,9 @@ def test_cli_help() -> None:
     """Verify CLI help display."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "gitcommit-ai" in result.output
-    assert "inspect" in result.output
-    assert "diff" in result.output
-    assert "history" in result.output
-    assert "context" in result.output
-    assert "examples" in result.output
+    output = plain(result.output)
+    for word in ("gitcommit-ai", "inspect", "diff", "history", "context", "examples", "doctor"):
+        assert word in output
 
 
 def test_cli_inspect_command(populated_repo: Path) -> None:
