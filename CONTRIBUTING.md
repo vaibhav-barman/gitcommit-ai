@@ -67,6 +67,10 @@ Do not use syntax newer than 3.11 (for example PEP 695 `def f[T]()` generics or 
   `FakeLLM` or the `scripted_llm` helper (`tests/fixtures/scripted_llm.py`), which can also inject
   provider errors. Provider backends and model listings are tested against `FakeHttp`
   (`tests/fixtures/http.py`), which answers canned responses per route and records every request.
+- **Never need a terminal.** The wizard and every command talk to a `Prompter`. Drive them with
+  `ScriptedPrompter` (`tests/fixtures/prompter.py`), which answers from a list, fails on an
+  unexpected or leftover prompt, and presses Ctrl+C with `CTRL_C`. CLI tests pass an
+  `Interaction` through `obj=` with the scripted prompter and a `FakeHttp` transport.
 - **Never touch your real config.** An autouse fixture points `GITCOMMIT_AI_CONFIG_DIR` at a
   temporary directory and clears provider variables, so saved settings and keys stay out of tests.
 - **Never commit anything shaped like a real key.** Build fake keys at runtime (for example

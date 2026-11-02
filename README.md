@@ -75,49 +75,30 @@ Diagnostics go to stderr and the message goes to stdout, so `git ai-commit --dry
 | **Bodies** | A body wrapped at 72 columns when at least half of recent commits have one, or the diff is large |
 | **`--hint`** | Tell it what the change is for; the message must still match the diff |
 | **`--amend`, `--no-verify`** | Reword or extend the last commit; skip pre-commit and commit-msg hooks |
+| **Guided setup** | The first run asks for a provider, key, model and commit mode, checking each answer live with the provider; keys are stored privately, never in the config file |
 | **Commit hook** | `hook install` makes plain `git commit` open your editor with a proposal; existing hooks are backed up and chained |
 | **Safe states** | Refuses mid-merge, cherry-pick or revert; notes a rebase; warns on a detached `HEAD` |
 | **Providers** | Anthropic, Google Gemini, Hugging Face, OpenAI, OpenRouter and Ollama (local or remote) over plain HTTP, behind one small protocol |
 
 ## Quick start
 
-**1. Install.** The package is not on PyPI yet, so install from a clone. Every provider works out of the box; there is nothing extra to install.
-
 ```bash
-git clone https://github.com/vaibhav-barman/gitcommit-ai.git
-cd gitcommit-ai
-pipx install .
+git clone https://github.com/vaibhav-barman/gitcommit-ai.git && cd gitcommit-ai
+pipx install .              # or: uv tool install . / pip install .
+cd /path/to/your/repo && git add -p
+git ai-commit               # the first run asks for a provider, key, model and commit mode
 ```
 
-**2. Set a provider key.** Ollama needs none.
+The package is not on PyPI yet, so it installs from a clone. Every provider works out of the box; there is nothing extra to install. The first run checks your key with the provider, lists the models that key can use, and sends one tiny test request before saving anything. Change any of it later with `git ai-commit setup`, or see [Configuration](#reference) in the reference.
 
-```bash
-export OPENAI_API_KEY=sk-...
-```
-
-A `.env` file in the current directory or the repository root works too; see the configuration section of the [reference](#reference).
-
-**3. First run.** Stage a change in any repository and preview the message without committing.
-
-```bash
-cd /path/to/your/repo
-git add -p
-git ai-commit --dry-run
-```
-
-**4. Optional: let plain `git commit` propose a message.**
-
-```bash
-git-ai-commit hook install
-git commit
-```
-
-**5. Everyday use.**
+Everyday use:
 
 ```bash
 git ai-commit                                   # print, then ask before committing (the default mode)
+git ai-commit --dry-run                         # print only
 git ai-commit --hint "fixes the flaky retry test"
 git ai-commit --amend                           # reword the last commit
+git-ai-commit hook install                      # let plain `git commit` propose a message
 ```
 
 ### Providers
@@ -221,38 +202,87 @@ flowchart LR
 
 <br>
 
-Settings are resolved in this order, highest priority first:
+**Where settings live.** `git ai-commit setup` (or the first run) saves your answers in a per-user config directory, outside every repository:
 
-1. **Command-line flags** (`--provider`, `--model`, `--max-iterations`)
-2. **Environment variables**
-3. **A `.env` file**, read from the current directory or, failing that, the root of the Git repository. Parent directories above the repository root and your home directory are never searched
-4. **The saved config file**, `config.toml` in your per-user config directory (`GITCOMMIT_AI_CONFIG_DIR`). It never holds API keys; saved keys live next to it in `credentials.toml`, readable only by you
-5. **Defaults**
+| System | Directory |
+|---|---|
+| macOS, Linux | `~/.config/gitcommit-ai` (or `$XDG_CONFIG_HOME/gitcommit-ai` when that is an absolute path) |
+| Windows | `%APPDATA%\gitcommit-ai` |
+| Anywhere | `GITCOMMIT_AI_CONFIG_DIR`, if set |
 
-API keys follow the same order: a key variable in the environment, then in `.env`, then the saved key.
+`config.toml` holds settings and never a key, so it is safe to show or share; `git ai-commit config path` prints its location:
 
-The `.env` file is parsed into memory only and never exported into the process environment. Blank values count as unset. Set `GITCOMMIT_AI_ENV_FILE` to use a specific file, or to an empty string to skip `.env` loading. [`.env.example`](.env.example) is a template. `git-ai-commit config` shows what is in effect:
+```toml
+schema_version = 1
+provider = "anthropic"
+commit_mode = "confirm"           # preview | confirm | auto
+credential_store = "file"         # file | keyring
+
+[providers.anthropic]
+model = "claude-sonnet-5-5"
+
+[providers.ollama]
+base_url = "http://localhost:11434"
+
+[generation]                      # written only by `config set`
+temperature = 0.3
+```
+
+Keys go in `credentials.toml` next to it, created readable only by you (mode 0600; on Windows it inherits the per-user permissions of `%APPDATA%`). A warning appears if its permissions are ever widened. To use the system keychain instead, install the `keyring` extra (`pipx install ".[keyring]"`) and choose it during setup, or run `git ai-commit config set credential_store keyring`, which moves saved keys. The keychain is opt-in because it can show a permission dialog, which would pause `git commit` through the hook. `git ai-commit reset` removes all of it.
+
+**Precedence**, highest first:
+
+```text
+settings:  flags   >  environment  >  .env (cwd, then repo root)  >  config.toml  >  built-in default
+model:     --model >  GITCOMMIT_AI_MODEL (env, .env)  >  model saved for the effective provider  >  provider default
+API key:   the provider's key variable (env, then .env)  >  saved key
+commit:    --dry-run / --yes / --confirm  >  GITCOMMIT_AI_COMMIT_MODE (env, .env)  >  commit_mode  >  confirm
+```
+
+A model is saved per provider, so switching providers and back restores the model you had, and a model saved for one provider is never sent to another. Setups configured entirely through environment variables, CI included, behave as they always did: they have no config file, and setup never starts for them.
+
+`git-ai-commit config` shows what is in effect and where each value came from:
 
 ```text
 $ git-ai-commit config
 Effective settings
   Precedence: flags > environment > .env > config file > defaults
   .env file:  none found
-  Config file: none
+  Config file: ~/.config/gitcommit-ai/config.toml
 
-  GITCOMMIT_AI_PROVIDER          openai                           [default]
-  GITCOMMIT_AI_MODEL             (provider default: gpt-4o-mini)  [default]
+  GITCOMMIT_AI_PROVIDER          anthropic                        [config file]
+  GITCOMMIT_AI_MODEL             claude-sonnet-5-5                [config file]
   GITCOMMIT_AI_TEMPERATURE       0.3                              [default]
   ...
 
 API keys
   openai      OPENAI_API_KEY = not set
-  anthropic   ANTHROPIC_API_KEY = not set
-  gemini      GOOGLE_API_KEY = not set
-  openrouter  OPENROUTER_API_KEY = not set
-  huggingface HF_TOKEN = not set
-  ollama      OLLAMA_API_KEY = not set (only for Ollama Cloud or a protected server)
+  anthropic   ANTHROPIC_API_KEY = ********a91c  [credentials file]
+  ...
 ```
+
+**Commit modes.**
+
+| Mode | What happens once the message is ready |
+|---|---|
+| `confirm` (default) | Ask before committing. Without a terminal it never asks: it prints the message and exits with code 1 |
+| `preview` | Print the message only |
+| `auto` | Commit without asking (setup offers it only as an explicit choice); an interrupted run still needs `--accept-partial` |
+
+`--dry-run`, `--yes` and `--confirm` override the mode for one run. The commit hook ignores it: the hook only proposes a message.
+
+**Windows.** Menus work in Windows Terminal, PowerShell and cmd. In Git Bash (mintty) the arrow-key menus cannot start, so setup falls back to numbered prompts; Windows Terminal is recommended.
+
+</details>
+
+<details>
+<summary><b>Using environment variables (CI, scripts)</b></summary>
+
+<br>
+
+Every setting has a variable, and variables beat the saved config. A `.env` file in the current directory or, failing that, the root of the Git repository works too; parent directories and your home directory are never searched. The `.env` file is parsed into memory only and never exported into the process environment. Blank values count as unset. [`.env.example`](.env.example) is a template; most people never need it.
+
+Key variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (or `GEMINI_API_KEY`), `OPENROUTER_API_KEY`, `HF_TOKEN` and `OLLAMA_API_KEY` (Ollama Cloud or a protected server only). Without a terminal, nothing ever prompts: with nothing set up, `git ai-commit` exits with code 1 and says to run `git ai-commit setup` or set `GITCOMMIT_AI_PROVIDER` and a key variable.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -332,7 +362,7 @@ API keys
 ```text
 gitcommit-ai/
 ├── src/git_commit_ai/
-│   ├── core/       config, settings (flags > env > .env > config file), saved config and keys, schemas, exceptions
+│   ├── core/       config, settings (flags > env > .env > config file), config dir, saved config and keys
 │   ├── git/        repository, diff, history, snapshots, committer, hook installer
 │   ├── context/    normalizer, convention detector, style analyzer, example selector, engine
 │   ├── llm/        provider protocol, HTTP layer, factory, retry, FakeLLM, backends
@@ -387,6 +417,7 @@ Tests run in temporary Git repositories and drive the agents with `FakeLLM`; pro
 - [x] Hardening: retries, graceful degradation, `.env` and `config`, `--hint`, bodies, `--amend`, commit hook
 - [x] CI on Python 3.11–3.13, typed package, license, contributing guide, changelog
 - [x] Evaluation harness with an offline mode
+- [x] Guided onboarding: setup wizard, saved settings and keys, six providers over plain HTTP, commit modes
 - [ ] Record the demo GIF (`make demo`)
 - [ ] Publish live evaluation results
 - [ ] Publish to PyPI

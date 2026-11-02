@@ -9,54 +9,34 @@ No version has been released yet; everything below is under **Unreleased**.
 
 ## [Unreleased]
 
-### Changed
-
-- **No provider SDKs.** Every provider is called over plain HTTP with `httpx`, so `pipx install .`
-  works for every provider with nothing else to install. The `openai`, `anthropic`, `gemini`,
-  `ollama` and `all` extras still exist but install nothing; they will be removed in the release
-  after next. Provider errors are mapped in one place: a rejected key, a retired model and a
-  provider's own error message (with keys redacted) are now reported distinctly.
-- Settings can be saved in `config.toml` and keys in `credentials.toml` (mode 0600) in the per-user
-  config directory (`GITCOMMIT_AI_CONFIG_DIR`). Both rank below the environment and `.env`, so
-  setups configured through variables behave exactly as before.
-
-### Added (this release)
+### Added
 
 - **Guided setup.** The first `git ai-commit` with nothing set up (no `config.toml`, no
-  `GITCOMMIT_AI_PROVIDER` and none of the key variables this tool always read) starts a wizard
-  in a terminal: provider, key (checked), model (listed by the provider and tested with one tiny
-  request) and commit mode. Without a terminal it explains instead, and the hook only prints a
-  note. New commands `setup`, `provider`, `model` and `key` (each with a form that never asks:
-  `provider NAME`, `model NAME`, `key --stdin`), on both `gitcommit-ai` and `git ai-commit`.
-- `config get/set/unset/path` to read and change saved settings (API keys are refused), `reset`
-  to remove the saved setup, and `doctor` to check the provider, key and model in effect (exit
-  code 1 on any failure). `config` alone still shows the effective settings.
-- Clearer provider errors: a rejected key names where it came from and how to replace it, and a
-  retired model points to `git ai-commit model`.
-
+  `GITCOMMIT_AI_PROVIDER` and none of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`)
+  starts a wizard in a terminal: provider, key (checked with the provider), model (listed by the
+  provider and tested with one tiny request) and commit mode. Without a terminal it explains
+  what to do instead, and the commit hook only prints a note. Nothing is written until the
+  wizard finishes, so Ctrl+C leaves no half-written files.
+- **Saved settings and keys**: `config.toml` and `credentials.toml` (mode 0600) in the per-user
+  config directory (`GITCOMMIT_AI_CONFIG_DIR`), or the system keychain with the opt-in `keyring`
+  extra. Both rank below the environment and `.env`, so setups configured through variables
+  behave exactly as before. Models are saved per provider.
+- **New commands** on both `gitcommit-ai` and `git ai-commit`: `setup`, `provider [NAME]`,
+  `model [NAME]`, `key [--stdin]`, `mode [MODE]`, `config get/set/unset/path`, `reset` and
+  `doctor`. Each interactive command has a form that never asks. API keys are never accepted by
+  `config set`.
+- **Commit modes** (`preview`, `confirm`, `auto`), saved with `git ai-commit mode` or set with
+  `GITCOMMIT_AI_COMMIT_MODE`, plus a `--confirm` flag that asks even in `auto` mode. `auto`
+  keeps the `--yes` guard: an interrupted run needs `--accept-partial`.
 - **OpenRouter and Hugging Face providers** (`openrouter`, `OPENROUTER_API_KEY`; `huggingface`,
   `HF_TOKEN`), sharing one OpenAI-compatible backend with OpenAI.
 - **Ollama keys**: `OLLAMA_API_KEY` is sent as a Bearer token, for Ollama Cloud
   (`GITCOMMIT_AI_OLLAMA_URL=https://ollama.com`) or a protected server. A warning appears when a
   key would go over plain `http://` to another machine.
 - `GEMINI_API_KEY` is accepted as well as `GOOGLE_API_KEY`.
-
-- **Commit modes** (`preview`, `confirm`, `auto`), saved with `git ai-commit mode` or set with
-  `GITCOMMIT_AI_COMMIT_MODE`, plus a `--confirm` flag that asks even in `auto` mode. `auto`
-  keeps the `--yes` guard: an interrupted run needs `--accept-partial`.
-
-### Behaviour changes
-
-- **Without a terminal, `confirm` mode no longer reads an answer from stdin.** `echo y | git
-  ai-commit` used to commit; it now prints the message and exits with code 1, saying to pass
-  `--yes` (or `--dry-run` to print only). Scripts that piped `y` should pass `--yes` instead.
-- `MissingAPIKeyError` now reads `No API key for <provider>. Run git ai-commit key, or set ...`.
-
-### Removed
-
-- `ProviderNotInstalledError`: there are no optional SDKs left to be missing.
-
-### Added
+- Clearer provider errors: a rejected key names where it came from and how to replace it, a
+  retired model points to `git ai-commit model`, and other provider messages are shown with any
+  key redacted.
 
 - **Git intelligence layer**: repository inspection, staged/unstaged/amend diff extraction with
   rename and binary detection, history extraction, and staged-tree snapshots for staleness
@@ -67,8 +47,7 @@ No version has been released yet; everything below is under **Unreleased**.
 - **Agent graph** (LangGraph): diff analyst, context retrieval, generator and critic nodes joined by
   a capped reflection loop that falls back to the best draft. The critic applies deterministic
   convention and style rules and uses the LLM only to check the message against the diff.
-- **LLM providers**: OpenAI, Anthropic, Gemini and Ollama behind one protocol, as optional extras
-  (`openai`, `anthropic`, `gemini`, `ollama`, `all`), plus a deterministic `FakeLLM` for tests.
+- **LLM providers** behind one protocol, plus a deterministic `FakeLLM` for tests.
 - **`generate` command** with `--provider`, `--model`, `--dry-run`, `--yes`, `--accept-partial`,
   `--max-iterations`, `--hint`, `--amend`, `--no-verify` and `--verbose`; the message goes to stdout
   and diagnostics to stderr. `--yes` refuses to commit a draft left unfinished by a provider error
@@ -111,14 +90,26 @@ No version has been released yet; everything below is under **Unreleased**.
 
 ### Changed
 
+- **No provider SDKs.** Every provider is called over plain HTTP with `httpx`, so `pipx install .`
+  works for every provider with nothing else to install. The `openai`, `anthropic`, `gemini`,
+  `ollama` and `all` extras still exist but install nothing; they will be removed in the release
+  after next.
+- **Without a terminal, `confirm` mode no longer reads an answer from stdin.** `echo y | git
+  ai-commit` used to commit; it now prints the message and exits with code 1, saying to pass
+  `--yes` (or `--dry-run` to print only). Scripts that piped `y` should pass `--yes` instead.
+- Settings precedence gains a layer: flags > environment > `.env` > `config.toml` > defaults.
+- `MissingAPIKeyError` now reads `No API key for <provider>. Run git ai-commit key, or set ...`.
+
 - The README is now a landing page: logo, a captured sample run, a comparison with one-shot
   prompts, a quick start, Mermaid diagrams, collapsible reference sections and an evaluation
   section whose results are still to be filled in. `docs/architecture.md` is aligned with it.
 - Minimum supported Python is 3.11.
-- The missing-SDK error also gives the `pipx` command, since `pip install` would target the wrong
-  environment for a pipx install.
 - A blank line between the subject and body is now a critic error rather than a warning, because
   Git folds an unseparated body into the subject.
+
+### Removed
+
+- `ProviderNotInstalledError`: there are no optional SDKs left to be missing.
 
 ### Fixed
 

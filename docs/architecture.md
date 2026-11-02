@@ -74,12 +74,12 @@ Contains data structures and runtime configuration shared across all layers:
     - `ExampleRetrievalResult`: Result of historical example selection. Fields: `examples`, `total_candidates`, `selection_metadata`.
     - `RepositoryContext`: Aggregated repository context bundle for consumption by AI generators. Fields: `style_profile`, `convention_result`, `historical_examples`, `analyzed_commit_count`, `retrieval_metadata`.
 - **`config.py`**:
-  - `GitCommitAIConfig`: Pydantic settings model. Fields: `history_commit_count`, `git_timeout_seconds`, `default_diff_mode`, `max_diff_size_bytes`, `llm_provider`, `llm_model`, `llm_temperature`, `llm_timeout_seconds`, `llm_max_retries`, `llm_retry_base_delay_seconds`, `llm_retry_max_delay_seconds`, `ollama_base_url`, `max_iterations` (1–10), `max_prompt_diff_chars`. The retry base delay may not exceed the max delay.
-  - `GitCommitAIConfig.from_env()` and `ENV_FIELDS`: map `GITCOMMIT_AI_*` variables to fields; an invalid value raises `ConfigurationError` naming the variable.
-  - `ProviderName`: `StrEnum` of the supported backends.
-  - API keys are deliberately **not** part of the configuration; they are read from the environment when a provider is created, so they never appear in reprs or logs.
+  - `GitCommitAIConfig`: Pydantic settings model. Fields: `history_commit_count`, `git_timeout_seconds`, `default_diff_mode`, `max_diff_size_bytes`, `llm_provider`, `llm_model`, `llm_temperature`, `llm_timeout_seconds`, `llm_max_retries`, `llm_retry_base_delay_seconds`, `llm_retry_max_delay_seconds`, `ollama_base_url`, `max_iterations` (1–10), `max_prompt_diff_chars`, `commit_mode`. The retry base delay may not exceed the max delay.
+  - `GitCommitAIConfig.from_env()` / `from_values()` and `ENV_FIELDS`: map `GITCOMMIT_AI_*` variables to fields; an invalid value raises `ConfigurationError` naming the variable, or `config.toml: <key>` when the value came from the saved config. `config_key()` maps a variable to its config key: the name without the `GITCOMMIT_AI_` prefix, lowercased.
+  - `ProviderName` (six providers), `CommitMode` (`preview`, `confirm`, `auto`), `PROVIDER_KEY_VARIABLES` (each provider's key variables, canonical first) and `ENVIRONMENT_SETUP_VARIABLES` (the variables whose presence means "already set up through the environment").
+  - API keys are deliberately **not** part of the configuration; they are resolved separately (`Settings.api_key_for`) and held only in fields left out of `repr`.
 - **`settings.py`**:
-  - `load_settings(env, start_dir, repo_root)` layers **flags > process environment > `.env` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, default).
+  - `load_settings(env, start_dir, repo_root, user_config, credentials)` layers **flags > process environment > `.env` > `config.toml` > defaults** and returns a `Settings` that also records where each value came from (`SettingSource`: flag, environment, `.env`, config file, credentials file, keychain, default). The saved model is the one stored for the *effective* provider. `Settings.api_key_for(provider)` returns a `ResolvedKey` (key variables in the environment, then `.env`, then the credential store), and `provider_configured_by_environment()` answers the first-run question.
   - The `.env` file is looked for in exactly two places: `start_dir` (the current directory) and then `repo_root`. Nothing else is searched: not parent directories, not the directories between the two, not the home directory, so a stray `.env` elsewhere cannot change the configuration. `core` knows nothing about Git, so the CLI resolves the root (`cli/settings_loader.py`, via `RepositoryInspector.find_repository_root()`); outside a repository, or without Git, only the current directory is searched. The file is parsed with `python-dotenv` into a dict. It is **never** written into `os.environ`, so its values cannot leak into child processes. `GITCOMMIT_AI_ENV_FILE` names a specific file, or disables loading when empty. Blank values count as unset at every layer.
   - `Settings.with_flags()` applies command-line flags on top (a flag left unset does not override anything); `mask_secret()` keeps only the last four characters of a secret.
 - **`exceptions.py`**:
@@ -93,7 +93,10 @@ Contains data structures and runtime configuration shared across all layers:
     - `ConfigurationError`: An environment variable or setting is invalid.
     - `AgentStateError`: A graph node ran before its upstream data existed.
     - `HookError`: The prepare-commit-msg hook cannot be installed or removed safely.
-    - `LLMError` and subclasses: `MissingAPIKeyError`, `ProviderNotInstalledError`, `OllamaUnreachableError`, `RateLimitError` (carries `retry_after` when the server sent one), `TransientLLMError` (timeouts, dropped connections, 5xx; retried), `LLMResponseError`.
+    - `UnsupportedConfigVersionError`: refuses to rewrite a `config.toml` written by a newer release.
+    - `SetupRequiredError`, `SetupCancelledError`: nothing is set up and there is no terminal; the user left setup (nothing was written).
+    - `LLMError` and subclasses: `MissingAPIKeyError`, `AuthenticationError` (fixed text, never the provider's body), `ModelNotAvailableError`, `RequestRejectedError` (other 4xx, with the redacted provider message and the blamed `param`), `OllamaUnreachableError`, `RateLimitError` (carries `retry_after` when the server sent one), `TransientLLMError` (timeouts, dropped connections, 5xx; retried), `LLMResponseError`.
+- **`paths.py`**, **`toml_writer.py`**, **`user_config.py`**, **`credentials.py`**: saved settings and keys; see [Onboarding and storage](#7-onboarding-and-storage).
 
 ### B. Git Intelligence Module (`git_commit_ai.git`)
 
@@ -457,14 +460,15 @@ sequenceDiagram
 | Style Analyzer | **Implemented** | Subject length (mean/median), capitalization, punctuation, body/scope usage, shifts |
 | Example Selector | **Implemented** | Multi-factor heuristic scoring (scope, path, type, keyword) with recency decay |
 | Context Engine Orchestrator | **Implemented** | Complete deterministic pipeline assembling `RepositoryContext` |
-| LLM Provider Abstraction | **Implemented** | OpenAI, Anthropic, Gemini, Ollama behind one protocol; typed errors; `FakeLLM` |
+| LLM Provider Abstraction | **Implemented** | Anthropic, Gemini, Hugging Face, OpenAI, OpenRouter and Ollama over plain HTTP behind one protocol; typed errors; `FakeLLM` |
+| Guided Onboarding | **Implemented** | First-run wizard, live key checks, model listings and test request, saved config and credentials, commit modes, `setup`/`provider`/`model`/`key`/`mode`/`config`/`reset`/`doctor` |
 | Prompt Engineering & Few-Shot | **Implemented** | Convention- and profile-driven prompts with retrieved examples and critic feedback |
 | LangGraph State Graph | **Implemented** | Analyst, retrieval, generator, critic nodes; capped reflection loop with best-draft fallback |
 | Diff Budgeting | **Implemented** | Water-filled per-file truncation; binary files summarised without patches |
-| CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`, `config`, `hook`; `git ai-commit` entry point |
+| CLI Commands | **Implemented** | `inspect`, `diff`, `history`, `context`, `examples`, `generate`, `config`, `hook`, the onboarding commands; `git ai-commit` entry point |
 | Unit & Integration Tests | **Implemented** | Unit, integration and eval tests using isolated temporary Git repositories and `FakeLLM`; no network |
 | Retry & Degradation | **Implemented** | Bounded exponential backoff; best-draft fallback on late provider errors |
-| Layered Settings | **Implemented** | flags > environment > `.env` (current directory or repository root only) > defaults; `config` command with masked secrets |
+| Layered Settings | **Implemented** | flags > environment > `.env` (current directory or repository root only) > `config.toml` > defaults; `config` command with masked secrets |
 | Hint & Bodies | **Implemented** | `--hint`; deterministic body rule; 72-column layout; body critic rules |
 | Amend / No-verify | **Implemented** | `DiffMode.AMEND`, HEAD-aware staleness guard, passthrough flags |
 | Hook Installer | **Implemented** | Backs up and chains foreign hooks; never blocks a commit |
@@ -474,3 +478,16 @@ sequenceDiagram
 | Demo Tooling | **Implemented** | `docs/demo.tape`, `scripts/demo/prepare.sh`, `make demo`; the GIF itself has to be recorded with a live provider |
 | CI & Packaging | **Implemented** | GitHub Actions (Ruff, mypy, pytest on 3.11–3.13, build smoke test); `py.typed` |
 | Interactive TUI | *Planned* | Interactive review and editing of the proposed message |
+
+## 7. Onboarding and storage
+
+The goal is `pipx install`, `git ai-commit`, a few answers, done, without changing anything for people who configure through environment variables.
+
+**Storage (`core`).** `paths.config_dir()` picks `GITCOMMIT_AI_CONFIG_DIR`, else `%APPDATA%\gitcommit-ai` on Windows, else `$XDG_CONFIG_HOME/gitcommit-ai` (absolute only) or `~/.config/gitcommit-ai`, macOS included. `user_config.py` reads and writes `config.toml` (a `UserConfig`: provider, commit mode, credential store, per-provider model and Ollama URL, generation overrides) with a small in-house TOML writer (`toml_writer.py`) whose output is round-trip checked with `tomllib`. A file from a newer schema version is read but never rewritten. `credentials.py` keeps keys in `credentials.toml` (temporary file created owner-only, then `os.replace`; mode 0600; directory 0700) or, opt-in, the OS keychain through the `keyring` extra. `migrate_keys` moves every key when the store changes, deleting from the old store only after every copy succeeded. Every write is atomic, so Ctrl+C never leaves half a file.
+
+**Setup questions (`llm.catalog`).** All answers come from the provider's API: a cheap key check, a filtered and sorted model listing, and one probe capped at 16 output tokens. The registry's fallback models appear only when listing fails, labelled with the date they were current.
+
+**The wizard (`onboarding`).** `SetupWizard` asks provider, key, model, commit mode and (when the keychain is usable and there is a new key) where to keep it, through a `Prompter`. `QuestionaryPrompter` gives arrow-key menus with number shortcuts and type-to-filter; `make_prompter` falls back to `PlainPrompter`, numbered prompts over plain lines, when prompt_toolkit cannot start (Git Bash). Every prompt raises `SetupCancelledError` on Ctrl+C. The Ollama branch (`ollama_flow.py`) handles this computer, Ollama Cloud (the probe is the key check, because listing is public) and another server (URL normalised, plain `http://` to another machine warned about, a 401/403 asks for a key). The wizard writes nothing; `persist()` saves a finished `SetupResult`: keys first, then `config.toml`, so a complete `config.toml` means setup finished.
+
+**When it runs (`cli`).** `generate` checks the key just before building the provider, after the repository and diff checks, so a run that would fail anyway (nothing staged) never starts setup. The full wizard runs only when there is no `config.toml`, nothing in the environment or `.env` set a provider up the old way, and the session is interactive (stdin and stdout are terminals, `TERM` is not `dumb`, `CI` is unset). A saved setup that lacks only the key asks for the key alone. Without a terminal nothing ever prompts: first runs raise `SetupRequiredError`, and `confirm` mode refuses to commit. The hook is never interactive.
+

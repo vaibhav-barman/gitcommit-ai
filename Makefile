@@ -8,7 +8,7 @@
 demo:
 	@command -v vhs >/dev/null || { echo "vhs is not installed: https://github.com/charmbracelet/vhs"; exit 1; }
 	@command -v uv >/dev/null || { echo "uv is not installed: https://docs.astral.sh/uv/"; exit 1; }
-	@test -n "$$OPENAI_API_KEY$$ANTHROPIC_API_KEY$$GOOGLE_API_KEY$$GITCOMMIT_AI_PROVIDER" || { \
-		echo "Set a provider key (OPENAI_API_KEY, ANTHROPIC_API_KEY or GOOGLE_API_KEY) or GITCOMMIT_AI_PROVIDER=ollama"; exit 1; }
+	@test -n "$$OPENAI_API_KEY$$ANTHROPIC_API_KEY$$GOOGLE_API_KEY$$OPENROUTER_API_KEY$$HF_TOKEN$$GITCOMMIT_AI_PROVIDER" || { \
+		echo "Set a provider key (for example OPENAI_API_KEY or ANTHROPIC_API_KEY) or GITCOMMIT_AI_PROVIDER=ollama"; exit 1; }
 	bash scripts/demo/prepare.sh
 	vhs docs/demo.tape
