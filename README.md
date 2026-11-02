@@ -115,7 +115,7 @@ git commit
 **5. Everyday use.**
 
 ```bash
-git ai-commit                                   # print, confirm, commit
+git ai-commit                                   # print, then ask before committing (the default mode)
 git ai-commit --hint "fixes the flaky retry test"
 git ai-commit --amend                           # reword the last commit
 ```
@@ -184,6 +184,7 @@ flowchart LR
 | `--model`, `-m` | Model name (default: the provider's default) |
 | `--dry-run` | Print the message and exit without committing |
 | `--yes`, `-y` | Commit without the confirmation prompt; refused if a provider error cut the run short |
+| `--confirm` | Ask before committing, even when the commit mode is `auto` (cannot be combined with `--yes`) |
 | `--accept-partial` | Let `--yes` commit a draft left unfinished by a provider error |
 | `--max-iterations` | Cap on generate/critique rounds (1–10) |
 | `--hint "text"` | What the change is for, in your own words (up to 1000 characters) |
@@ -198,6 +199,7 @@ flowchart LR
 | `git ai-commit provider` | Switch provider (keys and models saved for others are kept). `git ai-commit provider NAME` saves one without asking |
 | `git ai-commit model` | Pick a model from the provider's live list, then send one tiny test request. `git ai-commit model NAME` saves one without listing or testing; `--provider` changes another provider's model |
 | `git ai-commit key` | Replace a provider's key (hidden input, checked before saving). `git ai-commit key --stdin` reads it from a pipe; `--provider` picks whose key |
+| `git ai-commit mode` | Choose what happens once a message is ready: `preview`, `confirm` or `auto`. `git ai-commit mode NAME` saves one without asking |
 | `git-ai-commit config` | Show every setting, where it came from, and API keys masked to their last four characters |
 | `git-ai-commit hook install` / `hook uninstall` | Manage the `prepare-commit-msg` hook (both accept `--path`) |
 | `gitcommit-ai inspect` | Repository root, branch, detached `HEAD`, staged, unstaged and untracked files (`--path`) |
@@ -206,7 +208,7 @@ flowchart LR
 | `gitcommit-ai context` | Detected convention, style profile and evidence (`--count`, `--path`) |
 | `gitcommit-ai examples` | Historical commits relevant to your change, with reasons (`--max-examples`, `--unstaged`, `--path`) |
 
-`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `setup`, `provider`, `model`, `key`, `config` and `hook`.
+`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `setup`, `provider`, `model`, `key`, `mode`, `config` and `hook`.
 
 </details>
 
@@ -260,6 +262,7 @@ API keys
 | `GITCOMMIT_AI_RETRY_MAX_DELAY` | `30` | Longest wait before a retry; a longer `retry-after` is not waited out |
 | `GITCOMMIT_AI_MAX_ITERATIONS` | `3` | Generate/critique rounds (1–10) |
 | `GITCOMMIT_AI_MAX_DIFF_CHARS` | `24000` | Diff characters sent to the model (min 1000) |
+| `GITCOMMIT_AI_COMMIT_MODE` | `confirm` | `preview` (print only), `confirm` (ask first) or `auto` (commit without asking) |
 | `GITCOMMIT_AI_ENV_FILE` | none | A specific env file, or empty to skip `.env` loading |
 | `GITCOMMIT_AI_CONFIG_DIR` | per OS | Directory for the saved settings and keys (`config.toml`, `credentials.toml`); by default `~/.config/gitcommit-ai`, or `%APPDATA%\gitcommit-ai` on Windows |
 | `GITCOMMIT_AI_HOOK` | unset | Set to `0` to skip the commit hook for one commit |
@@ -277,7 +280,8 @@ API keys
 - **Large diffs**: each file's patch gets a share of a character budget. Small patches stay whole, large ones are truncated at a line boundary, and files that do not fit are listed by name only. A notice tells you when this happened.
 - **No approved draft**: after `max_iterations` rounds the best draft is shown with the issues the critic still has.
 - **Retries and provider errors**: rate limits and transient errors are retried with backoff and announced on stderr. If a provider still fails after the first draft exists (during the critic or a later round), the best draft so far is shown with a yellow "Stopped early" warning. A failure before any draft exists is an error.
-- **`--yes` and interrupted runs**: if a provider error stopped the run early, `--yes` prints the draft, then exits with code 1 and commits nothing. Pass `--accept-partial` to allow it. A draft the critic merely did not approve after `max_iterations` rounds is still committed by `--yes`; the warning is on stderr.
+- **Commit modes**: `confirm` (the default) asks before committing, `preview` only prints the message, and `auto` commits without asking (offered by setup only as an explicit choice). Per run, `--dry-run` previews, `--yes` commits and `--confirm` asks, whatever the mode. Without a terminal, `confirm` never prompts: it prints the message and exits with code 1, so pass `--yes` or `--dry-run` in scripts. Piping `y` into the command no longer confirms. The commit hook ignores the mode; it only proposes a message.
+- **`--yes` and interrupted runs**: if a provider error stopped the run early, `--yes` (or `auto` mode) prints the draft, then exits with code 1 and commits nothing. Pass `--accept-partial` to allow it. A draft the critic merely did not approve after `max_iterations` rounds is still committed by `--yes`; the warning is on stderr.
 - **Bodies**: a short body, wrapped at 72 columns, is generated when at least half of the recent commits have one or the diff is large (6+ files or 200+ changed lines). Otherwise the message is a subject line only.
 - **`--hint`** steers the type and wording, but the message must still match the diff.
 - **`--amend`**: the message describes `HEAD` together with staged changes, and `HEAD` itself is not used as an example. If `HEAD` moved while generating, nothing is amended.

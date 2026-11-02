@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from git_commit_ai.core.config import ProviderName
-from git_commit_ai.core.user_config import CommitMode
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.onboarding.model_menu import MenuAction
 from git_commit_ai.onboarding.ollama_flow import (
     OllamaLocation,

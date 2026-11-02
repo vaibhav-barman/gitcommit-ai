@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from git_commit_ai.core import credentials as credential_stores
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.core.exceptions import (
     AuthenticationError,
     LLMError,
@@ -21,7 +21,6 @@ from git_commit_ai.core.exceptions import (
 from git_commit_ai.core.user_config import (
     CONFIG_FILE,
     SCHEMA_VERSION,
-    CommitMode,
     CredentialStoreKind,
     UserConfig,
     save_user_config,

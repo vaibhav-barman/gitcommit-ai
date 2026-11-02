@@ -25,6 +25,14 @@ class ProviderName(enum.StrEnum):
     OLLAMA = "ollama"
 
 
+class CommitMode(enum.StrEnum):
+    """What happens once a message is ready."""
+
+    PREVIEW = "preview"
+    CONFIRM = "confirm"
+    AUTO = "auto"
+
+
 ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_PROVIDER": "llm_provider",
     "GITCOMMIT_AI_MODEL": "llm_model",
@@ -36,6 +44,7 @@ ENV_FIELDS: dict[str, str] = {
     "GITCOMMIT_AI_RETRY_MAX_DELAY": "llm_retry_max_delay_seconds",
     "GITCOMMIT_AI_MAX_ITERATIONS": "max_iterations",
     "GITCOMMIT_AI_MAX_DIFF_CHARS": "max_prompt_diff_chars",
+    "GITCOMMIT_AI_COMMIT_MODE": "commit_mode",
 }
 
 # Variables that hold each provider's API key, canonical name first. Ollama's key is
@@ -143,6 +152,11 @@ class GitCommitAIConfig(BaseModel):
         default=24_000,
         ge=1_000,
         description="Character budget for diff content included in LLM prompts",
+    )
+
+    commit_mode: CommitMode = Field(
+        default=CommitMode.CONFIRM,
+        description="preview prints only, confirm asks first, auto commits without asking",
     )
 
     @model_validator(mode="after")

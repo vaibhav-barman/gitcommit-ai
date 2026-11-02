@@ -7,14 +7,15 @@ from typing import TYPE_CHECKING, NoReturn
 import typer
 
 from git_commit_ai.agents.graph import CommitMessageGraph
-from git_commit_ai.cli.interaction import current, run_wizard, setup_required
+from git_commit_ai.cli.interaction import Interaction, current, run_wizard, setup_required
 from git_commit_ai.cli.settings_loader import load_cli_settings
 from git_commit_ai.cli.setup_cmds import report_setup
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.core.exceptions import (
     AuthenticationError,
     GitCommitAIError,
     ModelNotAvailableError,
+    SetupCancelledError,
     SetupRequiredError,
 )
 from git_commit_ai.core.schemas import DiffMode, RepositoryOperation
@@ -51,6 +52,9 @@ def generate(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the message without committing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Commit without asking for confirmation."),
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Ask before committing, even in auto commit mode."
+    ),
     accept_partial: bool = typer.Option(
         False,
         "--accept-partial",
@@ -83,15 +87,20 @@ def generate(
     """Generate a commit message for the staged changes.
 
     The message is printed to stdout; progress and diagnostics go to stderr.
-    Unless --dry-run is given, you are asked to confirm before committing.
+    What happens next follows the commit mode (preview, confirm or auto; see
+    `git ai-commit mode`): --dry-run prints only, --yes commits without asking, and
+    --confirm asks first. Without a terminal, confirm mode refuses instead of asking.
     With --amend the last commit is replaced. Its own message is not used as
     an example, and the message is written for the combined change.
 
-    If a provider error cut the run short, --yes refuses to commit the unfinished
-    draft (exit code 1) unless --accept-partial is also given.
+    If a provider error cut the run short, --yes (or auto mode) refuses to commit the
+    unfinished draft (exit code 1) unless --accept-partial is also given.
     """
     if ctx.invoked_subcommand is not None:
         return
+    if yes and confirm:
+        typer.secho("Error: --yes and --confirm can't be used together.", fg="red", err=True)
+        raise typer.Exit(code=2)
     if hint is not None and len(hint) > _MAX_HINT_CHARS:
         _fail(f"--hint is {len(hint)} characters; keep it under {_MAX_HINT_CHARS}.")
     settings: Settings | None = None
@@ -137,21 +146,22 @@ def generate(
         _report_review(result)
         typer.echo(result.message)
 
-        if dry_run:
+        action = _commit_action(settings.config.commit_mode, dry_run, yes, confirm)
+        if action is CommitMode.PREVIEW:
             return
         if info.is_detached_head:
             _note(
                 "HEAD is detached: the new commit will not belong to any branch.",
                 color=typer.colors.YELLOW,
             )
-        if yes and result.interruption and not accept_partial:
+        if action is CommitMode.AUTO and result.interruption and not accept_partial:
             _fail(
                 f"Not committing: the run stopped early ({result.interruption}). "
                 "Rerun, review the draft above and commit it yourself, "
                 "or pass --accept-partial to let --yes commit it."
             )
-        if not yes:
-            typer.confirm("Commit with this message?", abort=True, err=True)
+        if action is CommitMode.CONFIRM:
+            _confirm_commit(current(ctx))
         short_hash = GitCommitter(inspector, snapshots).commit(
             result.message, snapshot, amend=amend, no_verify=no_verify
         )
@@ -162,6 +172,33 @@ def generate(
         _fail(f"{exc} Run `git ai-commit model` to choose another.")
     except GitCommitAIError as exc:
         _fail(str(exc))
+
+
+def _commit_action(mode: CommitMode, dry_run: bool, yes: bool, confirm: bool) -> CommitMode:
+    """Flags win over the saved commit mode: --dry-run previews, --yes commits, --confirm asks."""
+    if dry_run:
+        return CommitMode.PREVIEW
+    if yes:
+        return CommitMode.AUTO
+    if confirm:
+        return CommitMode.CONFIRM
+    return mode
+
+
+def _confirm_commit(interaction: Interaction) -> None:
+    """Ask before committing; never prompt without a terminal (plan D12)."""
+    if not interaction.interactive:
+        _fail(
+            "Not committing: there is no terminal to confirm in. "
+            "Pass --yes, or --dry-run to print only."
+        )
+    try:
+        agreed = interaction.prompter_factory().confirm("Commit with this message?")
+    except SetupCancelledError:
+        agreed = False
+    if not agreed:
+        _note("Aborted.")
+        raise typer.Exit(code=1)
 
 
 def _ensure_provider(

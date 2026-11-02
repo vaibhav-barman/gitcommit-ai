@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from git_commit_ai.cli.git_subcommand import git_ai_commit
+from git_commit_ai.cli.interaction import Interaction
 from git_commit_ai.cli.main import app
 from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
 from git_commit_ai.core.user_config import UserConfig, save_user_config
@@ -28,6 +29,7 @@ from tests.fixtures.git_repo import (
     stage_file,
     start_operation,
 )
+from tests.fixtures.prompter import ScriptedPrompter
 from tests.fixtures.scripted_llm import scripted_llm
 
 if TYPE_CHECKING:
@@ -65,8 +67,12 @@ def staged_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _generate(repo: Path, *args: str, stdin: str | None = None) -> Result:
-    return runner.invoke(app, ["generate", "--path", str(repo), *args], input=stdin)
+def _generate(repo: Path, *args: str, answers: ScriptedPrompter | None = None) -> Result:
+    """Run ``generate``; with ``answers`` the run is interactive and answers from them."""
+    obj = None
+    if answers is not None:
+        obj = Interaction(interactive=True, prompter_factory=lambda: answers)
+    return runner.invoke(app, ["generate", "--path", str(repo), *args], obj=obj)
 
 
 class TestOutput:
@@ -215,14 +221,16 @@ class TestDegradation:
     def test_without_yes_an_interrupted_draft_goes_to_the_prompt(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "FAKE-" + "g" * 24)
         use_llm(monkeypatch, scripted_llm([GOOD], verdict_errors={1: RateLimitError("openai")}))
         before = commit_count(staged_repo)
 
-        result = _generate(staged_repo, "--accept-partial", stdin="n\n")
+        prompter = ScriptedPrompter([False])
+        result = _generate(staged_repo, "--accept-partial", answers=prompter)
 
         assert result.exit_code == 1
         assert commit_count(staged_repo) == before
-        assert "Commit with this message?" in result.stderr
+        assert prompter.messages() == ["Commit with this message?"]
 
     def test_dry_run_with_yes_is_not_an_error_for_an_interrupted_draft(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -492,9 +500,10 @@ class TestCommitting:
         assert "Committed" in result.stderr
 
     def test_confirming_commits(self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "FAKE-" + "g" * 24)
         use_llm(monkeypatch, scripted_llm([GOOD]))
 
-        result = _generate(staged_repo, stdin="y\n")
+        result = _generate(staged_repo, answers=ScriptedPrompter([True]))
 
         assert result.exit_code == 0
         assert head_message(staged_repo) == GOOD
@@ -502,10 +511,11 @@ class TestCommitting:
     def test_declining_aborts_without_committing(
         self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "FAKE-" + "g" * 24)
         use_llm(monkeypatch, scripted_llm([GOOD]))
         before = commit_count(staged_repo)
 
-        result = _generate(staged_repo, stdin="n\n")
+        result = _generate(staged_repo, answers=ScriptedPrompter([False]))
 
         assert result.exit_code == 1
         assert commit_count(staged_repo) == before

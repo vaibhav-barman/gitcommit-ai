@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import httpx
 import pytest
 
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.core.credentials import (
     CredentialStore,
     FileCredentialStore,
@@ -17,7 +17,6 @@ from git_commit_ai.core.exceptions import SetupCancelledError, UnsupportedConfig
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE, load_settings
 from git_commit_ai.core.user_config import (
     SCHEMA_VERSION,
-    CommitMode,
     CredentialStoreKind,
     ProviderPreferences,
     UserConfig,

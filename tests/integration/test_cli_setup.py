@@ -10,14 +10,13 @@ from typer.testing import CliRunner
 from git_commit_ai.cli.git_subcommand import git_app
 from git_commit_ai.cli.interaction import Interaction
 from git_commit_ai.cli.main import app
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.core.credentials import FileCredentialStore
 from git_commit_ai.core.exceptions import AuthenticationError, ModelNotAvailableError
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from git_commit_ai.core.user_config import (
     CONFIG_FILE,
     SCHEMA_VERSION,
-    CommitMode,
     ProviderPreferences,
     UserConfig,
     load_user_config,

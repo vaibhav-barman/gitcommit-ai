@@ -224,6 +224,8 @@ def _saved_values(user_config: UserConfig | None, env_provider: str | None) -> d
     model = user_config.preferences(provider).model
     if model:
         values["llm_model"] = model
+    if user_config.commit_mode is not None:
+        values["commit_mode"] = user_config.commit_mode
     ollama_url = user_config.preferences(ProviderName.OLLAMA).base_url
     if ollama_url:
         values["ollama_base_url"] = ollama_url

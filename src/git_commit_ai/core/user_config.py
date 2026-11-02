@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.core.exceptions import ConfigurationError, UnsupportedConfigVersionError
 from git_commit_ai.core.toml_writer import dumps
 
@@ -25,14 +25,6 @@ DIRECTORY_MODE = 0o700
 NEWER_VERSION_NOTE = (
     "config.toml was written by a newer gitcommit-ai; some settings may be ignored."
 )
-
-
-class CommitMode(enum.StrEnum):
-    """What happens once a message is ready."""
-
-    PREVIEW = "preview"
-    CONFIRM = "confirm"
-    AUTO = "auto"
 
 
 class CredentialStoreKind(enum.StrEnum):

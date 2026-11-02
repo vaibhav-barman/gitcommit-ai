@@ -15,13 +15,15 @@ import typer
 
 from git_commit_ai.cli.interaction import Interaction, current, run_wizard
 from git_commit_ai.cli.settings_loader import load_cli_settings
-from git_commit_ai.core.config import ProviderName  # noqa: TC001  (Typer reads it at runtime)
+from git_commit_ai.core.config import (  # Typer reads both at runtime
+    CommitMode,
+    ProviderName,
+)
 from git_commit_ai.core.credentials import open_credential_store
 from git_commit_ai.core.exceptions import GitCommitAIError, UnsupportedConfigVersionError
 from git_commit_ai.core.paths import config_dir
 from git_commit_ai.core.user_config import (
     CONFIG_FILE,
-    CommitMode,
     CredentialStoreKind,
     UserConfig,
     load_user_config,
@@ -42,7 +44,7 @@ MODE_SUMMARY = {
     CommitMode.PREVIEW: "print only",
     CommitMode.AUTO: "commit without asking",
 }
-CHANGE_HINT = "Change any of this later: git ai-commit provider | model | key | config"
+CHANGE_HINT = "Change any of this later: git ai-commit provider | model | key | mode | config"
 
 
 def setup(ctx: typer.Context) -> None:
@@ -106,8 +108,7 @@ def model(
             _note(f"Saved. Model for {result.provider.value}: {result.model}")
     pinned = settings.environment.get("GITCOMMIT_AI_MODEL")
     if pinned:
-        where = "environment" if settings.process_env.get("GITCOMMIT_AI_MODEL") else ".env file"
-        _note(f"GITCOMMIT_AI_MODEL={pinned} in your {where} overrides this setting.")
+        _note_override(settings, "GITCOMMIT_AI_MODEL", pinned)
 
 
 def key(
@@ -129,6 +130,32 @@ def key(
             interaction = _terminal(ctx, "key needs a terminal, or pass --stdin.")
             run_wizard(interaction, settings, lambda wizard: wizard.run_key(target))
     _note("Saved.")
+
+
+def mode(
+    ctx: typer.Context,
+    name: CommitMode | None = typer.Argument(
+        None, help="Save this mode without asking: preview, confirm or auto."
+    ),
+) -> None:
+    """Choose what happens once a message is ready: print it, ask first, or commit."""
+    with _errors():
+        settings = load_cli_settings()
+        if name is None:
+            interaction = _terminal(ctx, "mode needs a terminal, or pass a mode.")
+            result, _ = run_wizard(interaction, settings, SetupWizard.run_mode)
+            chosen = result.commit_mode or CommitMode.CONFIRM
+        else:
+            update_config(lambda config: config.model_copy(update={"commit_mode": name}))
+            chosen = name
+    hint = " (override once with --confirm or --dry-run)" if chosen is CommitMode.AUTO else ""
+    _note(f"Saved. Commit mode: {chosen.value}{hint}")
+    pinned = settings.environment.get("GITCOMMIT_AI_COMMIT_MODE")
+    if pinned:
+        where = (
+            "environment" if settings.process_env.get("GITCOMMIT_AI_COMMIT_MODE") else ".env file"
+        )
+        _note(f"GITCOMMIT_AI_COMMIT_MODE={pinned} in your {where} overrides this setting.")
 
 
 def report_setup(result: SetupResult, saved: UserConfig) -> None:
@@ -186,6 +213,11 @@ def _save_key_from_stdin(
     saved = settings.user_config
     kind = saved.credential_store if saved else CredentialStoreKind.FILE
     open_credential_store(config_dir(os.environ), kind).set(provider, value)
+
+
+def _note_override(settings: Settings, variable: str, value: str) -> None:
+    where = "environment" if settings.process_env.get(variable) else ".env file"
+    _note(f"{variable}={value} in your {where} overrides this setting.")
 
 
 def _terminal(ctx: typer.Context, message: str) -> Interaction:

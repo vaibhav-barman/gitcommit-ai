@@ -38,6 +38,17 @@ No version has been released yet; everything below is under **Unreleased**.
   key would go over plain `http://` to another machine.
 - `GEMINI_API_KEY` is accepted as well as `GOOGLE_API_KEY`.
 
+- **Commit modes** (`preview`, `confirm`, `auto`), saved with `git ai-commit mode` or set with
+  `GITCOMMIT_AI_COMMIT_MODE`, plus a `--confirm` flag that asks even in `auto` mode. `auto`
+  keeps the `--yes` guard: an interrupted run needs `--accept-partial`.
+
+### Behaviour changes
+
+- **Without a terminal, `confirm` mode no longer reads an answer from stdin.** `echo y | git
+  ai-commit` used to commit; it now prints the message and exits with code 1, saying to pass
+  `--yes` (or `--dry-run` to print only). Scripts that piped `y` should pass `--yes` instead.
+- `MissingAPIKeyError` now reads `No API key for <provider>. Run git ai-commit key, or set ...`.
+
 ### Removed
 
 - `ProviderNotInstalledError`: there are no optional SDKs left to be missing.

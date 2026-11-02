@@ -10,12 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.config import CommitMode, ProviderName
 from git_commit_ai.core.exceptions import ConfigurationError, UnsupportedConfigVersionError
 from git_commit_ai.core.user_config import (
     CONFIG_FILE,
     SCHEMA_VERSION,
-    CommitMode,
     CredentialStoreKind,
     GenerationOverrides,
     ProviderPreferences,
