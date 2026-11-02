@@ -63,6 +63,18 @@ class UnsupportedConfigVersionError(ConfigurationError):
         self.path = path
 
 
+class SetupRequiredError(GitCommitAIError):
+    """Raised when a run needs a provider, none is set up, and there is no terminal to
+    set one up in."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No provider is set up. Run `git ai-commit setup` in a terminal, or set\n"
+            "GITCOMMIT_AI_PROVIDER and that provider's key variable (for example "
+            "ANTHROPIC_API_KEY)."
+        )
+
+
 class SetupCancelledError(GitCommitAIError):
     """Raised when the user leaves setup (Ctrl+C, Ctrl+D, end of input, or "Cancel")."""
 
@@ -79,7 +91,8 @@ class MissingAPIKeyError(LLMError):
 
     def __init__(self, provider: str, env_var: str) -> None:
         super().__init__(
-            f"No API key for provider '{provider}'. Set the {env_var} environment variable."
+            f"No API key for {provider}. Run `git ai-commit key`, "
+            f"or set the {env_var} environment variable."
         )
         self.provider = provider
         self.env_var = env_var

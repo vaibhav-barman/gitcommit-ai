@@ -151,7 +151,7 @@ def test_live_mode_uses_the_provider_and_announces_the_cost(
 def test_live_mode_without_an_api_key_is_a_clean_error(repo: Path, tmp_path: Path) -> None:
     result = _invoke(repo, tmp_path / "out", "-n", "1")
     assert result.exit_code == 1
-    assert "No API key for provider 'openai'" in result.stderr
+    assert "No API key for openai." in result.stderr
     assert "OPENAI_API_KEY" in result.stderr
 
 

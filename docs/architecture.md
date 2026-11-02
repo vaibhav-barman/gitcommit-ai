@@ -26,12 +26,13 @@ The codebase follows a `src`-based package layout (`src/git_commit_ai/`) divided
 flowchart LR
     cli["cli"] --> agents["agents"]
     cli --> git["git"]
+    cli --> onboarding["onboarding"]
     agents --> context["context"]
     agents --> llm["llm"]
     context --> core["core"]
     git --> core
     llm --> core
-    onboarding["onboarding"] --> llm
+    onboarding --> llm
 ```
 
 (The CLI also imports `context`, `core` and `llm` directly: it builds the provider and prints the deterministic reports. `agents` never imports `git`, and nothing below `cli` imports it. `onboarding`, the setup wizard, imports only `llm` and `core`.)
@@ -176,7 +177,10 @@ Builds the user-facing command-line tool using [Typer](https://typer.tiangolo.co
 - `config`: shows each effective setting with its source and the `.env` file in use; API keys are masked to their last four characters.
 - `hook install` / `hook uninstall`: manage the `prepare-commit-msg` hook. A hidden `hook run` is what the hook calls; it writes a proposal into the message file above Git's comments and **never blocks a commit**: no staged changes, a pending merge, a user template, a missing key, a provider failure or any unexpected error only print a note.
 - `git-ai-commit` console script: a command group whose callback is `generate`, so a bare `git ai-commit --dry-run` works (git finds `git-<name>` executables on `PATH`) while `config` and `hook` remain reachable. It also accepts `-h`, because git intercepts `--help` for external commands.
-- `cli/settings_loader.py` is the one place commands load settings: it resolves the repository root and calls `load_settings`.
+- `cli/settings_loader.py` is the one place commands load settings: it resolves the repository root, reads the saved `config.toml` and credential store, and calls `load_settings`. It warns when the credentials file is readable by others, when `config.toml` came from a newer release, and when `GITCOMMIT_AI_CONFIG_DIR` points inside the repository.
+- `cli/interaction.py`: an `Interaction` on `ctx.obj` says whether the run may ask questions (stdin and stdout are terminals, `TERM` is not `dumb`, `CI` is unset) and builds the prompter. `run_wizard` runs one wizard flow and saves its result. Tests pass an `Interaction` with scripted answers and a fake HTTP transport.
+- `cli/setup_cmds.py`: `setup`, `provider [NAME]`, `model [NAME] [--provider]` and `key [--provider] [--stdin]`, on both entry points. The forms with a name or `--stdin` never ask.
+- `generate` checks the key just before building the provider. With nothing set up at all it runs the full wizard (or, without a terminal, raises `SetupRequiredError`); with a saved setup that lacks only the key, it asks for the key. A rejected key names where it came from, and a retired model points to `model`. The hook never asks: with nothing set up it prints `no proposal (no provider is set up; ...)` and the commit continues.
 - Error handling maps all `GitCommitAIError` exceptions to clean terminal stderr messages and exit code 1.
 
 ### E. LLM Module (`git_commit_ai.llm`)

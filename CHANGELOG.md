@@ -22,6 +22,15 @@ No version has been released yet; everything below is under **Unreleased**.
 
 ### Added (this release)
 
+- **Guided setup.** The first `git ai-commit` with nothing set up (no `config.toml`, no
+  `GITCOMMIT_AI_PROVIDER` and none of the key variables this tool always read) starts a wizard
+  in a terminal: provider, key (checked), model (listed by the provider and tested with one tiny
+  request) and commit mode. Without a terminal it explains instead, and the hook only prints a
+  note. New commands `setup`, `provider`, `model` and `key` (each with a form that never asks:
+  `provider NAME`, `model NAME`, `key --stdin`), on both `gitcommit-ai` and `git ai-commit`.
+- Clearer provider errors: a rejected key names where it came from and how to replace it, and a
+  retired model points to `git ai-commit model`.
+
 - **OpenRouter and Hugging Face providers** (`openrouter`, `OPENROUTER_API_KEY`; `huggingface`,
   `HF_TOKEN`), sharing one OpenAI-compatible backend with OpenAI.
 - **Ollama keys**: `OLLAMA_API_KEY` is sent as a Bearer token, for Ollama Cloud

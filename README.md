@@ -158,12 +158,13 @@ The graph runs on [LangGraph](https://github.com/langchain-ai/langgraph). Everyt
 flowchart LR
     cli["cli"] --> agents["agents"]
     cli --> git["git"]
+    cli --> onboarding["onboarding"]
     agents --> context["context"]
     agents --> llm["llm"]
     context --> core["core"]
     git --> core
     llm --> core
-    onboarding["onboarding"] --> llm
+    onboarding --> llm
 ```
 
 [`docs/architecture.md`](docs/architecture.md) has the state schema, node contracts, critic rules and design decisions.
@@ -193,6 +194,10 @@ flowchart LR
 
 | Command | What it does |
 |---|---|
+| `git ai-commit setup` | Choose a provider, key, model and commit mode; every answer is checked with the provider. Runs by itself the first time `git ai-commit` has nothing set up and a terminal is attached |
+| `git ai-commit provider` | Switch provider (keys and models saved for others are kept). `git ai-commit provider NAME` saves one without asking |
+| `git ai-commit model` | Pick a model from the provider's live list, then send one tiny test request. `git ai-commit model NAME` saves one without listing or testing; `--provider` changes another provider's model |
+| `git ai-commit key` | Replace a provider's key (hidden input, checked before saving). `git ai-commit key --stdin` reads it from a pipe; `--provider` picks whose key |
 | `git-ai-commit config` | Show every setting, where it came from, and API keys masked to their last four characters |
 | `git-ai-commit hook install` / `hook uninstall` | Manage the `prepare-commit-msg` hook (both accept `--path`) |
 | `gitcommit-ai inspect` | Repository root, branch, detached `HEAD`, staged, unstaged and untracked files (`--path`) |
@@ -201,7 +206,7 @@ flowchart LR
 | `gitcommit-ai context` | Detected convention, style profile and evidence (`--count`, `--path`) |
 | `gitcommit-ai examples` | Historical commits relevant to your change, with reasons (`--max-examples`, `--unstaged`, `--path`) |
 
-`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `config` and `hook`.
+`gitcommit-ai` offers every command above, including `generate`, `config` and `hook`. `git-ai-commit` takes the flags of `generate` directly (for example `git ai-commit --verbose`) and also offers `setup`, `provider`, `model`, `key`, `config` and `hook`.
 
 </details>
 
@@ -297,8 +302,10 @@ API keys
 | You see | Cause and fix |
 |---|---|
 | `Nothing is staged. Stage your changes first` | Run `git add` first; GitCommit AI never stages for you |
-| `No API key for provider 'openai'. Set the OPENAI_API_KEY environment variable.` | Export the key, or put it in a `.env` in the current directory or repository root. `git-ai-commit config` shows what was found and where |
-| `openai rejected the API key (HTTP 401).` | The key is wrong, revoked, or lacks permission. Replace it; `git-ai-commit config` shows which key was used and where it came from |
+| `No provider is set up.` | Run `git ai-commit setup` in a terminal, or set `GITCOMMIT_AI_PROVIDER` and that provider's key variable. The commit hook only prints a note |
+| `No API key for openai. Run git ai-commit key, or set the OPENAI_API_KEY environment variable.` | Run `git ai-commit key`, export the key, or put it in a `.env` in the current directory or repository root. `git-ai-commit config` shows what was found and where |
+| `... isn't available from openai (it may have been retired or renamed)` | Run `git ai-commit model` to pick a current model |
+| `OpenAI rejected the API key from ...` | The key is wrong, revoked, or lacks permission. The message names where the key came from: run `git ai-commit key` for a saved key, or update the variable |
 | `Could not reach Ollama at http://localhost:11434.` | Start it with `ollama serve`, or set `GITCOMMIT_AI_OLLAMA_URL` |
 | Yellow `Stopped early: ...` | A provider error cut the run short. The best draft is shown. Rerun, or commit it yourself; `--yes` needs `--accept-partial` |
 | `The staged changes changed while the message was being generated` | You staged or committed during generation. Nothing was committed; run it again |

@@ -8,9 +8,13 @@ import pytest
 from typer.testing import CliRunner
 
 from git_commit_ai.cli.git_subcommand import git_app
+from git_commit_ai.cli.interaction import Interaction
 from git_commit_ai.cli.main import app
+from git_commit_ai.core.config import ProviderName
+from git_commit_ai.core.credentials import FileCredentialStore
 from git_commit_ai.core.exceptions import RateLimitError
 from git_commit_ai.core.settings import ENV_FILE_VARIABLE
+from git_commit_ai.core.user_config import UserConfig, save_user_config
 from git_commit_ai.git.hooks import HOOK_NAME
 from tests.fixtures.cli import use_llm
 from tests.fixtures.git_repo import (
@@ -21,6 +25,7 @@ from tests.fixtures.git_repo import (
     stage_file,
     start_operation,
 )
+from tests.fixtures.prompter import ScriptedPrompter
 from tests.fixtures.scripted_llm import scripted_llm
 
 if TYPE_CHECKING:
@@ -209,9 +214,12 @@ class TestRun:
         assert message_file.read_text() == GIT_TEMPLATE
 
     def test_missing_api_key_never_fails_the_hook(
-        self, staged_repo: Path, message_file: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        staged_repo: Path,
+        message_file: Path,
+        isolated_user_config: Path,
     ) -> None:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        save_user_config(isolated_user_config, UserConfig())
         result = self._run(staged_repo, message_file)
         assert result.exit_code == 0
         assert "OPENAI_API_KEY" in result.stderr
@@ -231,3 +239,69 @@ class TestRun:
         assert result.exit_code == 0
         assert "bug" in result.stderr
         assert message_file.read_text() == GIT_TEMPLATE
+
+
+class TestRunWithoutSetup:
+    """The hook never asks anything, even when a terminal is attached."""
+
+    KEY = "FAKE-" + "h" * 24 + "0b0b"
+
+    @pytest.fixture
+    def message_file(self, tmp_path: Path) -> Path:
+        path = tmp_path / "COMMIT_EDITMSG"
+        path.write_text(GIT_TEMPLATE)
+        return path
+
+    def _interactive(self) -> Interaction:
+        def no_prompts() -> ScriptedPrompter:
+            raise AssertionError("the hook must never prompt")
+
+        return Interaction(interactive=True, prompter_factory=no_prompts)
+
+    def test_no_setup_leaves_a_note_and_never_prompts(
+        self,
+        staged_repo: Path,
+        message_file: Path,
+        isolated_user_config: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        created = use_llm(monkeypatch, scripted_llm([GOOD]), configured=False)
+        args = ["hook", "run", str(message_file), "--path", str(staged_repo)]
+        result = runner.invoke(git_app, args, obj=self._interactive())
+        assert result.exit_code == 0
+        assert (
+            "git-ai-commit: no proposal (no provider is set up; run git ai-commit setup)"
+            in result.stderr
+        )
+        assert message_file.read_text() == GIT_TEMPLATE
+        assert created.configs == []
+        assert not isolated_user_config.exists()
+
+    def test_uses_the_saved_provider_and_key(
+        self,
+        staged_repo: Path,
+        message_file: Path,
+        isolated_user_config: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        save_user_config(isolated_user_config, UserConfig(provider=ProviderName.ANTHROPIC))
+        FileCredentialStore(isolated_user_config).set(ProviderName.ANTHROPIC, self.KEY)
+        created = use_llm(monkeypatch, scripted_llm([GOOD]))
+        args = ["hook", "run", str(message_file), "--path", str(staged_repo)]
+        result = runner.invoke(git_app, args, obj=self._interactive())
+        assert result.exit_code == 0, result.stderr
+        assert created.configs[0].llm_provider is ProviderName.ANTHROPIC
+        assert created.api_keys == [self.KEY]
+        assert message_file.read_text().startswith(GOOD)
+
+    def test_a_missing_key_with_a_saved_setup_is_a_note_not_a_prompt(
+        self,
+        staged_repo: Path,
+        message_file: Path,
+        isolated_user_config: Path,
+    ) -> None:
+        save_user_config(isolated_user_config, UserConfig(provider=ProviderName.ANTHROPIC))
+        args = ["hook", "run", str(message_file), "--path", str(staged_repo)]
+        result = runner.invoke(git_app, args, obj=self._interactive())
+        assert result.exit_code == 0
+        assert "git-ai-commit: no proposal (No API key for anthropic." in result.stderr

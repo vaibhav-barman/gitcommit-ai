@@ -13,7 +13,7 @@ from git_commit_ai.core.credentials import (
     open_credential_store,
 )
 from git_commit_ai.core.exceptions import GitNotFoundError
-from git_commit_ai.core.paths import config_dir
+from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE, config_dir
 from git_commit_ai.core.settings import Settings, load_settings
 from git_commit_ai.core.user_config import (
     NEWER_VERSION_NOTE,
@@ -33,9 +33,17 @@ def load_cli_settings(repo_path: str = ".") -> Settings:
     directory rank below both.
     """
     user_config, credentials = load_saved_layers()
+    root = _repository_root(repo_path)
+    if root is not None and os.environ.get(CONFIG_DIR_VARIABLE):
+        directory = config_dir(os.environ).resolve()
+        if directory.is_relative_to(root.resolve()):
+            _warn(
+                f"{CONFIG_DIR_VARIABLE} ({directory}) is inside this repository, so saved "
+                "keys could be committed. Point it somewhere outside any repository."
+            )
     return load_settings(
         os.environ,
-        repo_root=_repository_root(repo_path),
+        repo_root=root,
         user_config=user_config,
         credentials=credentials,
     )

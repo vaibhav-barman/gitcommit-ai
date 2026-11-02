@@ -9,6 +9,7 @@ Provides commands for Git intelligence and repository context:
     - ``generate``: Generate a commit message with the agent graph.
     - ``config``: Show the effective settings and their sources.
     - ``hook``: Install or remove the prepare-commit-msg hook.
+    - ``setup``, ``provider``, ``model``, ``key``: Change the saved setup.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import typer
 from git_commit_ai.cli.config_cmd import config
 from git_commit_ai.cli.generate import generate
 from git_commit_ai.cli.hook import hook_app
+from git_commit_ai.cli.setup_cmds import key, model, provider, setup
 from git_commit_ai.context.engine import RepositoryContextEngine
 from git_commit_ai.context.example_selector import HistoricalExampleSelector
 from git_commit_ai.core.config import GitCommitAIConfig
@@ -37,6 +39,8 @@ app = typer.Typer(
 app.command()(generate)
 app.command()(config)
 app.add_typer(hook_app, name="hook")
+for _command in (setup, provider, model, key):
+    app.command()(_command)
 
 
 def _handle_error(err: GitCommitAIError) -> None:

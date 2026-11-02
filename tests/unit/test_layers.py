@@ -41,6 +41,7 @@ def test_the_drawn_layers_are_the_real_ones_without_implied_edges() -> None:
     assert real_layer_edges() == {
         ("cli", "agents"),
         ("cli", "git"),
+        ("cli", "onboarding"),
         ("agents", "context"),
         ("agents", "llm"),
         ("context", "core"),

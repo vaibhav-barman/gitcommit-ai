@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from git_commit_ai.cli.git_subcommand import git_ai_commit
 from git_commit_ai.cli.main import app
 from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
+from git_commit_ai.core.user_config import UserConfig, save_user_config
 from git_commit_ai.llm import FakeLLM
 from git_commit_ai.llm.retry import RetryEvent
 from tests.fixtures.cli import use_llm
@@ -156,8 +157,10 @@ class TestDegradation:
         assert result.stdout.strip() == ""
 
     def test_retries_are_announced(
-        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+        self, staged_repo: Path, monkeypatch: pytest.MonkeyPatch, isolated_user_config: Path
     ) -> None:
+        save_user_config(isolated_user_config, UserConfig())
+
         def announce(
             config: GitCommitAIConfig, api_key: str | None, on_retry: object = None
         ) -> FakeLLM:
@@ -638,7 +641,10 @@ class TestConfiguration:
         assert seen[0].llm_provider.value == "anthropic"
         assert seen[0].max_iterations == 4
 
-    def test_missing_api_key_names_the_variable(self, staged_repo: Path) -> None:
+    def test_missing_api_key_names_the_variable(
+        self, staged_repo: Path, isolated_user_config: Path
+    ) -> None:
+        save_user_config(isolated_user_config, UserConfig())
         result = _generate(staged_repo, "--dry-run", "--provider", "openai")
 
         assert result.exit_code == 1

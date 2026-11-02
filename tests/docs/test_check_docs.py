@@ -326,7 +326,8 @@ class TestCompleteness:
         (root / "docs").mkdir(exist_ok=True)
 
     REAL = (
-        "    cli --> agents\n    cli --> git\n    agents --> context\n    agents --> llm\n"
+        "    cli --> agents\n    cli --> git\n    cli --> onboarding\n"
+        "    agents --> context\n    agents --> llm\n"
         "    context --> core\n    git --> core\n    llm --> core\n    onboarding --> llm"
     )
 
