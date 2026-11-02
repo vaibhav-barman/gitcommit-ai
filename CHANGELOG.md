@@ -12,11 +12,13 @@ No version has been released yet; everything below is under **Unreleased**.
 ### Added
 
 - **Guided setup.** The first `git ai-commit` with nothing set up (no `config.toml`, no
-  `GITCOMMIT_AI_PROVIDER` and none of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`)
-  starts a wizard in a terminal: provider, key (checked with the provider), model (listed by the
+  `--provider`, no `GITCOMMIT_AI_PROVIDER` and none of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GOOGLE_API_KEY`) starts a wizard in a terminal: provider, key (checked with the provider), model (listed by the
   provider and tested with one tiny request) and commit mode. Without a terminal it explains
   what to do instead, and the commit hook only prints a note. Nothing is written until the
-  wizard finishes, so Ctrl+C leaves no half-written files.
+  wizard finishes, so Ctrl+C leaves no half-written files. An explicit `--provider` without a
+  key skips the wizard: the error names that provider's key variable, and a terminal asks for
+  the key alone.
 - **Saved settings and keys**: `config.toml` and `credentials.toml` (mode 0600) in the per-user
   config directory (`GITCOMMIT_AI_CONFIG_DIR`), or the system keychain with the opt-in `keyring`
   extra. Both rank below the environment and `.env`, so setups configured through variables

@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
+from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from tests.fixtures.git_repo import commit_file, init_repo
 
 # Variables that would let a developer's own setup leak into a test.
@@ -38,10 +39,13 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def isolated_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the per-user config at a temporary directory and clear provider variables,
-    so no test reads or writes the real ``~/.config/gitcommit-ai``."""
+    """Point the per-user config at a temporary directory, skip ``.env`` loading and clear
+    provider variables, so neither the real ``~/.config/gitcommit-ai`` nor a developer's own
+    ``.env`` in the checkout can change a test. Tests of ``.env`` handling set
+    ``GITCOMMIT_AI_ENV_FILE`` themselves (or delete it to test discovery)."""
     directory = tmp_path / "user-config"
     monkeypatch.setenv(CONFIG_DIR_VARIABLE, str(directory))
+    monkeypatch.setenv(ENV_FILE_VARIABLE, "")
     for variable in _ISOLATED_VARIABLES:
         monkeypatch.delenv(variable, raising=False)
     return directory

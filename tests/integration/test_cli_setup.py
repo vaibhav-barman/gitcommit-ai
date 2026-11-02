@@ -175,6 +175,37 @@ class TestFirstRun:
         assert result.exit_code == 0, result.stderr
         assert created.configs[0].llm_provider is ProviderName.OLLAMA
 
+    def test_an_explicit_provider_without_a_key_names_its_variable(
+        self, staged_repo: Path, isolated_user_config: Path
+    ) -> None:
+        # The real create_provider runs here: it is what reports the missing key.
+        result = runner.invoke(
+            git_app,
+            ["--path", str(staged_repo), "--dry-run", "--provider", "openrouter"],
+            obj=_non_interactive(),
+        )
+        assert result.exit_code == 1
+        assert "No API key for openrouter." in result.stderr
+        assert "OPENROUTER_API_KEY" in result.stderr
+        assert "No provider is set up" not in result.stderr
+        assert not isolated_user_config.exists()
+
+    def test_an_explicit_provider_asks_only_for_its_key_in_a_terminal(
+        self, staged_repo: Path, isolated_user_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        created = use_llm(monkeypatch, scripted_llm([GOOD]), configured=False)
+        session = Session([KEY])
+        result = session.invoke(
+            git_app, ["--path", str(staged_repo), "--dry-run", "--provider", "anthropic"]
+        )
+        assert result.exit_code == 0, result.stderr
+        assert session.prompter.messages() == ["Anthropic API key:"]
+        assert created.api_keys == [KEY]
+        assert FileCredentialStore(isolated_user_config).get(ProviderName.ANTHROPIC) == KEY
+        saved = load_user_config(isolated_user_config)
+        assert saved is not None
+        assert saved.provider is None
+
     def test_nothing_staged_fails_before_any_setup(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

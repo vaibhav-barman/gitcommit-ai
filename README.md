@@ -282,7 +282,7 @@ API keys
 
 Every setting has a variable, and variables beat the saved config. A `.env` file in the current directory or, failing that, the root of the Git repository works too; parent directories and your home directory are never searched. The `.env` file is parsed into memory only and never exported into the process environment. Blank values count as unset. [`.env.example`](.env.example) is a template; most people never need it.
 
-Key variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (or `GEMINI_API_KEY`), `OPENROUTER_API_KEY`, `HF_TOKEN` and `OLLAMA_API_KEY` (Ollama Cloud or a protected server only). Without a terminal, nothing ever prompts: with nothing set up, `git ai-commit` exits with code 1 and says to run `git ai-commit setup` or set `GITCOMMIT_AI_PROVIDER` and a key variable.
+Key variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (or `GEMINI_API_KEY`), `OPENROUTER_API_KEY`, `HF_TOKEN` and `OLLAMA_API_KEY` (Ollama Cloud or a protected server only). Without a terminal, nothing ever prompts: with nothing set up, `git ai-commit` exits with code 1 and says to run `git ai-commit setup` or set `GITCOMMIT_AI_PROVIDER` and a key variable. Passing `--provider` counts as a choice already made, so a run like `git ai-commit --provider openai` without a key names the missing variable (`OPENAI_API_KEY`) instead; in a terminal it asks for that key alone and offers to save it.
 
 | Variable | Default | Meaning |
 |---|---|---|

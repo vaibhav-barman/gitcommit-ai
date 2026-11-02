@@ -13,6 +13,8 @@ from git_commit_ai.cli.git_subcommand import git_ai_commit
 from git_commit_ai.cli.interaction import Interaction
 from git_commit_ai.cli.main import app
 from git_commit_ai.core.exceptions import RateLimitError, TransientLLMError
+from git_commit_ai.core.paths import CONFIG_DIR_VARIABLE
+from git_commit_ai.core.settings import ENV_FILE_VARIABLE
 from git_commit_ai.core.user_config import UserConfig, save_user_config
 from git_commit_ai.llm import FakeLLM
 from git_commit_ai.llm.retry import RetryEvent
@@ -684,14 +686,42 @@ class TestGitSubcommand:
         assert info.value.code == 0
         assert "--dry-run" in plain(capsys.readouterr().out)
 
-    def test_runs_generate_directly_without_a_subcommand_name(self, staged_repo: Path) -> None:
-        launcher = "from git_commit_ai.cli.git_subcommand import git_ai_commit; git_ai_commit()"
-        completed = subprocess.run(
-            [sys.executable, "-c", launcher, "--path", str(staged_repo), "--provider", "openai"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env={"PATH": "/usr/bin:/bin"},
+    def test_runs_generate_directly_without_a_subcommand_name(
+        self, staged_repo: Path, tmp_path: Path
+    ) -> None:
+        completed = _launch_git_ai_commit(
+            tmp_path, "--path", str(staged_repo), "--provider", "openai"
         )
         assert completed.returncode == 1
         assert "OPENAI_API_KEY" in completed.stderr
+
+    def test_a_fresh_process_with_nothing_set_up_explains_instead_of_prompting(
+        self, staged_repo: Path, tmp_path: Path
+    ) -> None:
+        completed = _launch_git_ai_commit(tmp_path, "--path", str(staged_repo))
+        assert completed.returncode == 1
+        assert "No provider is set up. Run `git ai-commit setup`" in completed.stderr
+        assert list((tmp_path / "home").iterdir()) == []
+
+
+def _launch_git_ai_commit(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run ``git ai-commit`` in a fresh process that sees nothing of the developer's machine:
+    an empty HOME and XDG config directory, an empty gitcommit-ai config directory, no
+    ``.env``, no provider variables and no terminal."""
+    home = tmp_path / "home"
+    home.mkdir()
+    launcher = "from git_commit_ai.cli.git_subcommand import git_ai_commit; git_ai_commit()"
+    return subprocess.run(
+        [sys.executable, "-c", launcher, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            CONFIG_DIR_VARIABLE: str(home / "gitcommit-ai"),
+            ENV_FILE_VARIABLE: "",
+        },
+    )

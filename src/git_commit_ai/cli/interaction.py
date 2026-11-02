@@ -56,9 +56,18 @@ def current(ctx: typer.Context) -> Interaction:
 
 
 def setup_required(settings: Settings) -> bool:
-    """Plan D9: no ``config.toml`` and nothing in the environment or ``.env`` that set a
-    provider up the old way."""
-    return settings.user_config is None and not settings.provider_configured_by_environment()
+    """Plan D9: no ``config.toml``, no ``--provider`` flag, and nothing in the environment or
+    ``.env`` that set a provider up the old way.
+
+    An explicit ``--provider`` is a choice already made, like ``GITCOMMIT_AI_PROVIDER``:
+    the run then needs only that provider's key, so the error names its variable (and a
+    terminal asks for the key alone).
+    """
+    return (
+        settings.user_config is None
+        and "llm_provider" not in settings.flag_fields
+        and not settings.provider_configured_by_environment()
+    )
 
 
 def run_wizard(
